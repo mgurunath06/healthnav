@@ -12,12 +12,20 @@ _RATE_LIMIT_DELAYS = [2.0, 5.0]  # seconds between 429 retries (spec §7.1)
 
 _PLACEHOLDER_KEY = "your_key_here"
 
+# Maps OpenRouter model IDs → local Ollama equivalents (spec §2.2)
+_OLLAMA_MODEL_MAP: dict[str, str] = {
+    "anthropic/claude-haiku-4-5": "llama3.1:8b",   # fast trio: Guardrail, Triage, Red Flag
+    "anthropic/claude-sonnet-4":  "gemma4:latest",  # Assembler
+    "google/gemini-flash-2.0":    "gemma4:latest",  # Deep-Dive, Lifestyle
+}
+
 
 def _ollama_base() -> str:
     return os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 
-def _ollama_model() -> str:
-    return os.getenv("OLLAMA_MODEL", "llama3.2")
+def _ollama_fallback_model() -> str:
+    """Used only when an unmapped model name is passed in Ollama mode."""
+    return os.getenv("OLLAMA_MODEL", "llama3.1:8b")
 
 
 class AgentFailure(Exception):
@@ -37,8 +45,9 @@ class OpenRouterClient:
             print(json.dumps({
                 "event": "backend_selection",
                 "backend": "ollama",
-                "model": _ollama_model(),
                 "base_url": _ollama_base(),
+                "model_map": _OLLAMA_MODEL_MAP,
+                "fallback_model": _ollama_fallback_model(),
                 "reason": "OPENROUTER_API_KEY not set — using local Ollama",
             }), flush=True)
 
@@ -101,7 +110,7 @@ class OpenRouterClient:
         if self._use_ollama:
             url = f"{_ollama_base()}/chat/completions"
             headers = {"Content-Type": "application/json"}
-            actual_model = _ollama_model()
+            actual_model = _OLLAMA_MODEL_MAP.get(model, _ollama_fallback_model())
         else:
             url = f"{_OPENROUTER_BASE}/chat/completions"
             headers = {
@@ -112,18 +121,18 @@ class OpenRouterClient:
             }
             actual_model = model
 
+        body: dict = {
+            "model": actual_model,
+            "messages": messages,
+            "temperature": temperature,
+        }
+        # Ollama does not support response_format (spec §2.3) — prompt-level enforcement only
+        if not self._use_ollama:
+            body["response_format"] = {"type": "json_object"}
+
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(
-                    url,
-                    headers=headers,
-                    json={
-                        "model": actual_model,
-                        "messages": messages,
-                        "temperature": temperature,
-                        "response_format": {"type": "json_object"},
-                    },
-                )
+                response = await client.post(url, headers=headers, json=body)
         except httpx.TimeoutException:
             raise _TimeoutError()
 
@@ -134,9 +143,16 @@ class OpenRouterClient:
         response.raise_for_status()
 
         try:
-            return response.json()["choices"][0]["message"]["content"]
+            content = response.json()["choices"][0]["message"]["content"]
+            return _strip_think_tags(content)
         except (KeyError, IndexError) as exc:
             raise AgentFailure("MALFORMED_JSON") from exc
+
+
+def _strip_think_tags(text: str) -> str:
+    """Remove <think>...</think> blocks emitted by reasoning models (e.g. Qwen3)."""
+    import re
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 
 def _append_json_reminder(messages: list[dict]) -> list[dict]:

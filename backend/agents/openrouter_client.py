@@ -7,8 +7,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-_BASE_URL = "https://openrouter.ai/api/v1"
+_OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 _RATE_LIMIT_DELAYS = [2.0, 5.0]  # seconds between 429 retries (spec §7.1)
+
+_PLACEHOLDER_KEY = "your_key_here"
+
+
+def _ollama_base() -> str:
+    return os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+
+def _ollama_model() -> str:
+    return os.getenv("OLLAMA_MODEL", "llama3.2")
 
 
 class AgentFailure(Exception):
@@ -20,10 +29,18 @@ class AgentFailure(Exception):
 
 class OpenRouterClient:
     def __init__(self):
-        key = os.getenv("OPENROUTER_API_KEY")
-        if not key:
-            raise RuntimeError("OPENROUTER_API_KEY not set")
-        self._api_key = key
+        key = os.getenv("OPENROUTER_API_KEY", "")
+        # Fall back to Ollama when the key is absent or still the placeholder
+        self._use_ollama = not key or key == _PLACEHOLDER_KEY
+        self._api_key = key if not self._use_ollama else ""
+        if self._use_ollama:
+            print(json.dumps({
+                "event": "backend_selection",
+                "backend": "ollama",
+                "model": _ollama_model(),
+                "base_url": _ollama_base(),
+                "reason": "OPENROUTER_API_KEY not set — using local Ollama",
+            }), flush=True)
 
     async def chat(
         self,
@@ -81,18 +98,27 @@ class OpenRouterClient:
         temperature: float,
         timeout: float,
     ) -> str:
+        if self._use_ollama:
+            url = f"{_ollama_base()}/chat/completions"
+            headers = {"Content-Type": "application/json"}
+            actual_model = _ollama_model()
+        else:
+            url = f"{_OPENROUTER_BASE}/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://healthnav.app",
+                "X-Title": "HealthNav",
+            }
+            actual_model = model
+
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(
-                    f"{_BASE_URL}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {self._api_key}",
-                        "Content-Type": "application/json",
-                        "HTTP-Referer": "https://healthnav.app",
-                        "X-Title": "HealthNav",
-                    },
+                    url,
+                    headers=headers,
                     json={
-                        "model": model,
+                        "model": actual_model,
                         "messages": messages,
                         "temperature": temperature,
                         "response_format": {"type": "json_object"},

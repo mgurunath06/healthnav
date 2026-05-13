@@ -9,21 +9,24 @@ from .openrouter_client import AgentFailure, OpenRouterClient
 _MODEL_ROLE = "deep_dive"
 _TEMPERATURE = 0.6
 
-_SYSTEM_PROMPT = """You are the Symptom Deep-Dive agent for HealthNav, a doctor visit preparation tool.
+_SYSTEM_PROMPT = """You are a clinical interviewer for HealthNav, a doctor visit preparation tool. Your job is to build a complete clinical picture of the patient's symptoms through targeted, adaptive questioning — one question at a time.
 
-Your job: extract structured clinical findings from the user's symptom description, then decide whether you need follow-up questions to fill gaps. If the user has already answered follow-up questions, incorporate those answers into the findings.
+You receive the patient's symptom description and the full conversation history (every question asked and every answer given so far). Use this to decide:
+1. What you now know about the clinical picture.
+2. What is the single most important thing still unknown that would change the Doctor Prep Card.
+3. Whether you have enough — if so, stop asking.
 
 --- Output format ---
 Respond ONLY with a valid JSON object — no markdown fences, no text outside the JSON.
 
 {
   "structured_findings": {
-    "duration": "string describing how long (e.g. '3 days', '2 weeks', 'since Monday') or null if unknown",
+    "duration": "string or null",
     "severity": "mild" | "moderate" | "severe" | null,
-    "frequency": "string describing pattern (e.g. 'constant', 'every morning', 'comes and goes') or null if unknown",
-    "triggers": ["list of things that make it worse or cause onset — empty array if none identified"],
-    "associated_symptoms": ["list of other symptoms mentioned alongside the main one — empty array if none"],
-    "alleviating_factors": ["list of things that help or reduce the symptom — empty array if none"]
+    "frequency": "string or null",
+    "triggers": ["list"],
+    "associated_symptoms": ["list"],
+    "alleviating_factors": ["list"]
   },
   "needs_followup": true | false,
   "followup_questions": [
@@ -34,39 +37,52 @@ Respond ONLY with a valid JSON object — no markdown fences, no text outside th
       "choices": [{"value": "snake_case", "label": "Display text"}],
       "scale_min": 1,
       "scale_max": 10,
-      "scale_min_label": "No pain",
-      "scale_max_label": "Worst pain",
-      "allow_other_text": true
+      "scale_min_label": "string",
+      "scale_max_label": "string",
+      "allow_other_text": false
     }
-  ]
+  ],
+  "topic_overview": {
+    "title": "short title e.g. 'About Back Pain'",
+    "summary": "2-3 sentence general medical overview of this symptom category — NOT specific to this patient",
+    "common_causes": ["3-4 general causes that commonly produce this symptom type"],
+    "when_to_see_doctor": "one sentence of general guidance on urgency"
+  }
 }
 
---- Field rules ---
-- structured_findings: populate every field you can from the description. Use null / empty array only when genuinely unknown.
-- needs_followup: set true ONLY on the FIRST call when key fields (duration, severity, or frequency) are all null AND no previous_answers were provided.
-- followup_questions: required when needs_followup=true, otherwise empty array [].
-- If previous_answers are provided, needs_followup must be false — incorporate the answers and return complete findings.
+--- Clinical interviewer rules ---
+- Generate exactly ONE question in followup_questions when needs_followup=true. Never more than one.
+- Every question must be a DIRECT consequence of what was just answered. Ask what the answer made you curious about. Do not ask generic, template questions.
+  BAD: "How long have you had this symptom?" (generic)
+  GOOD: "You said the pain is constant — does it wake you up at night, or is it only while you're awake?" (follows from the previous answer)
+- Never ask about anything already covered in the conversation history.
+- Choose the question type that fits the question naturally:
+  yes_no → strictly true/false binary ("does it wake you at night?", "have you tried painkillers?"). Both answers must be literally Yes or No.
+  single_choice → one answer from a list of named options. Use this even for two options when the options have distinct labels ("Painful" vs "Pins and needles", "Better" vs "Worse" vs "Same"). Never use yes_no when the options are anything other than a plain yes/no.
+  multi_choice → multiple answers may apply ("which of these make it worse?")
+  scale → intensity or quantity on a spectrum ("rate your pain 1–10")
+- allow_other_text: true only for single_choice and multi_choice when the options may not cover the patient's experience. False for yes_no and scale always.
+- Stop asking (needs_followup=false) when:
+  - duration, severity, and frequency are all known, OR
+  - the conversation history has 5 or more exchanges, OR
+  - additional questions would not meaningfully change the prep card.
 
---- Question type rules ---
-- single_choice / multi_choice → populate choices[] with {"value": ..., "label": ...}. Omit scale fields.
-- yes_no → fixed choices: [{"value": "yes", "label": "Yes"}, {"value": "no", "label": "No"}]
-- scale → populate scale_min, scale_max, scale_min_label, scale_max_label. Omit choices[].
-- allow_other_text defaults to true for single_choice and multi_choice; false for yes_no and scale.
-- Generate 2–4 targeted questions. Don't ask about information already in the description.
+--- Structured findings rules ---
+- Extract from the symptom description AND every answer in the conversation history.
+- When an answer contains free text (e.g. the key ends in "_other"), treat it as the patient's own clinical description and extract meaning from it.
+- Use null / empty array only when genuinely unknown after considering all available information.
+
+--- Topic overview rules ---
+- topic_overview is general educational content about this symptom CATEGORY — it would appear in a medical encyclopedia, not in this patient's chart.
+- summary: 2-3 sentences of neutral medical context, written for a lay audience.
+- common_causes: 3-4 of the most common general causes for this symptom type.
+- when_to_see_doctor: one sentence of general guidance (e.g. "See a doctor if symptoms persist beyond a week or are accompanied by fever.").
+- Always return topic_overview on every response.
 
 --- Severity mapping ---
-- "mild"     = noticeable but not interfering with daily activities
-- "moderate" = interfering with some daily activities
-- "severe"   = significantly limiting or disabling
-
---- Examples of good structured_findings extraction ---
-Input: "I've had a throbbing headache for 3 days, mostly in the morning, worse with bright light"
-→ duration: "3 days", severity: infer from "throbbing" → "moderate", frequency: "mostly in the morning",
-  triggers: ["bright light"], associated_symptoms: [], alleviating_factors: []
-
-Input: "lower back pain for 2 weeks, gets better when I lie down, worse after sitting"
-→ duration: "2 weeks", frequency: "persistent", triggers: ["prolonged sitting"],
-  alleviating_factors: ["lying down"]"""
+mild = noticeable but not interfering with daily activities
+moderate = interfering with some daily activities
+severe = significantly limiting or disabling"""
 
 
 class FollowUpChoice(BaseModel):
@@ -83,7 +99,20 @@ class FollowUpQuestion(BaseModel):
     scale_max: int | None = None
     scale_min_label: str | None = None
     scale_max_label: str | None = None
-    allow_other_text: bool = True
+    allow_other_text: bool = False
+
+
+class FollowUpQA(BaseModel):
+    question_id: str
+    question_text: str
+    answer: str
+
+
+class TopicOverview(BaseModel):
+    title: str
+    summary: str
+    common_causes: list[str] = []
+    when_to_see_doctor: str
 
 
 class StructuredFindings(BaseModel):
@@ -98,13 +127,14 @@ class StructuredFindings(BaseModel):
 class DeepDiveInput(BaseModel):
     symptom_description: str
     primary_symptom_category: str
-    previous_answers: dict[str, str] = {}
+    follow_up_history: list[FollowUpQA] = []
 
 
 class DeepDiveOutput(BaseModel):
     structured_findings: StructuredFindings
     needs_followup: bool
     followup_questions: list[FollowUpQuestion] = []
+    topic_overview: TopicOverview | None = None
 
 
 class DeepDiveAgent:
@@ -112,17 +142,18 @@ class DeepDiveAgent:
         self._client = OpenRouterClient()
 
     async def run(self, inp: DeepDiveInput) -> DeepDiveOutput:
-        previous_section = ""
-        if inp.previous_answers:
-            answers_lines = "\n".join(
-                f"  {q_id}: {answer}" for q_id, answer in inp.previous_answers.items()
-            )
-            previous_section = f"\n\nPrevious follow-up answers:\n{answers_lines}"
+        history_section = ""
+        if inp.follow_up_history:
+            lines = []
+            for i, qa in enumerate(inp.follow_up_history, 1):
+                lines.append(f"Q{i}: {qa.question_text}")
+                lines.append(f"A{i}: {qa.answer}")
+            history_section = "\n\nConversation so far:\n" + "\n".join(lines)
 
         user_content = (
             f"Symptom description: {inp.symptom_description}\n"
             f"Primary symptom category: {inp.primary_symptom_category}"
-            f"{previous_section}"
+            f"{history_section}"
         )
 
         messages = [

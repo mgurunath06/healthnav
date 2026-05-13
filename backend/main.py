@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from agents.supervisor import Supervisor
 
-app = FastAPI(title="HealthNav API", version="1.1")
+app = FastAPI(title="HealthNav API", version="1.2")
 
 app.add_middleware(
     CORSMiddleware,
@@ -15,23 +15,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Single supervisor instance — stateless agents, safe for concurrent requests
 _supervisor = Supervisor()
 
 
 # ── Request model ─────────────────────────────────────────────────────────────
 
+class FollowUpHistoryItem(BaseModel):
+    question_id: str
+    question_text: str
+    answer: str
+
+
 class InvestigateRequest(BaseModel):
     request_id: str
     symptom_description: str = Field(min_length=10, max_length=2000)
-    follow_up_answers: dict[str, str] = {}
+    follow_up_history: list[FollowUpHistoryItem] = []
 
 
 # ── Exception handlers ────────────────────────────────────────────────────────
 
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-    # Extract request_id from body if available so the response can be traced
     try:
         body = await request.json()
         request_id = body.get("request_id", "unknown")
@@ -53,7 +57,7 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "1.1"}
+    return {"status": "ok", "version": "1.2"}
 
 
 @app.post("/investigate")
@@ -62,7 +66,7 @@ async def investigate(req: InvestigateRequest) -> dict:
         return await _supervisor.run(
             request_id=req.request_id,
             symptom_description=req.symptom_description,
-            follow_up_answers=req.follow_up_answers,
+            follow_up_history=[item.model_dump() for item in req.follow_up_history],
         )
     except Exception:
         return {

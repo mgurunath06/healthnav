@@ -28,9 +28,9 @@ class Supervisor:
         self,
         request_id: str,
         symptom_description: str,
-        follow_up_answers: dict[str, str] | None = None,
+        follow_up_history: list[dict] | None = None,
     ) -> dict:
-        follow_up_answers = follow_up_answers or {}
+        follow_up_history = follow_up_history or []
         trace: list[dict] = []
 
         self._log(request_id, "request_received", metadata={"symptom_hash": _sha256_prefix(symptom_description)})
@@ -63,10 +63,10 @@ class Supervisor:
 
         # ── Phase 3: Deep-Dive ────────────────────────────────────────────────
         deep_dive = await self._run_deep_dive(
-            request_id, symptom_description, triage, follow_up_answers, trace
+            request_id, symptom_description, triage, follow_up_history, trace
         )
-        if deep_dive is not None and deep_dive.needs_followup and not follow_up_answers:
-            return self._needs_followup(request_id, deep_dive.followup_questions, trace)
+        if deep_dive is not None and deep_dive.needs_followup:
+            return self._needs_followup(request_id, deep_dive.followup_questions, trace, deep_dive.topic_overview)
 
         # ── Phase 4: Lifestyle ────────────────────────────────────────────────
         lifestyle: LifestyleOutput | None = None
@@ -76,8 +76,7 @@ class Supervisor:
             )
             # Lifestyle may also request follow-up (spec §7.1 path 8)
             if lifestyle is not None and lifestyle.needs_followup:
-                if not _has_answers_for(lifestyle.followup_questions, follow_up_answers):
-                    return self._needs_followup(request_id, lifestyle.followup_questions, trace)
+                return self._needs_followup(request_id, lifestyle.followup_questions, trace)
 
         # ── Phase 5: Assembler ────────────────────────────────────────────────
         agents_run = [
@@ -213,7 +212,7 @@ class Supervisor:
         request_id: str,
         symptom_description: str,
         triage: TriageOutput | None,
-        follow_up_answers: dict[str, str],
+        follow_up_history: list[dict],
         trace: list[dict],
     ) -> DeepDiveOutput | None:
         started = _iso_now()
@@ -225,7 +224,7 @@ class Supervisor:
                 DeepDiveInput(
                     symptom_description=symptom_description,
                     primary_symptom_category=category,
-                    previous_answers=follow_up_answers,
+                    follow_up_history=follow_up_history,
                 )
             )
             dur = _ms() - t
@@ -393,12 +392,13 @@ class Supervisor:
         self._log(request_id, "response_sent", metadata={"status": "emergency"})
         return response
 
-    def _needs_followup(self, request_id: str, questions: list, trace: list[dict]) -> dict:
+    def _needs_followup(self, request_id: str, questions: list, trace: list[dict], topic_overview=None) -> dict:
         self._log_routing(request_id, "needs_followup: deep-dive requested more info", trace)
         response = {
             "status": "needs_followup",
             "request_id": request_id,
             "questions": [q.model_dump(exclude_none=True) for q in questions],
+            "topic_overview": topic_overview.model_dump() if topic_overview else None,
             "agent_trace": trace,
         }
         self._log(request_id, "response_sent", metadata={"status": "needs_followup"})

@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+@theme {
+  /* Warm Slate — Background / Surface */
+  --color-warm-charcoal: #1A1814;
+  --color-warm-surface: #242018;
+  --color-warm-elevated: #2E2A24;
+  --color-warm-border: #3D3830;
+
+  /* Warm Slate — Text */
+  --color-warm-off-white: #F0EBE3;
+  --color-warm-muted: #9A9080;
+
+  /* Accent */
+  --color-accent: #C4622D;
+  --color-accent-hover: #A8501F;
+
+  /* Triage Quadrants */
+  --color-quadrant-q1: #B84C3A;
+  --color-quadrant-q2: #C49A3C;
+  --color-quadrant-q3: #6B8F71;
+  --color-quadrant-q4: #7A7060;
+
+  /* Typography */
+  --font-serif: 'Fraunces', 'Playfair Display', Georgia, serif;
+  --font-sans: 'Inter', 'DM Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+
+  /* Shadows */
+  --shadow-matte: 0 4px 20px -2px rgba(26, 24, 20, 0.4);
+
+  /* Motion */
+  --ease-editorial: cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+
+/* Base */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  margin: 0;
+  background-color: #1A1814;
+  color: #F0EBE3;
+  font-family: 'Inter', 'DM Sans', system-ui, sans-serif;
+  min-height: 100dvh;
+}
+
+#root {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}

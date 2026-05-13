@@ -5,6 +5,7 @@
 > **Source of truth:** This document. Code must conform. If reality forces a change, update this doc *first*, then code.
 
 ### Changelog
+- **v1.4** — Frontend contract rewritten to match `spec/UIDeisgn.md` (Sprint 3). Stack upgraded: Tailwind CSS replaces plain CSS, Zustand replaces bare React state, Burnt Sienna replaces teal accent. Full color token system, typography, motion rules, and component map added. Loading and Error screen specs added (missing from UI spec). "Save as PDF" retained as a disabled stub CTA (PDF generation remains v2).
 - **v1.3** — Model strategy updated: Ollama local models used during development. OpenRouter used in production (Railway deploy). Model mappings updated accordingly.
 - **v1.2** — Two-tier product model (Free + Premium), tier-aware API, quadrant scoring added to Assembler, micro-engagement added to frontend, Premium features documented in future scope.
 - **v1.1** — Guardrail Agent, options-based follow-up questions, structured audit logging, v3 future scope.
@@ -65,24 +66,53 @@ HealthNav is a **preparation tool**, not a diagnostic tool. It exists to help us
 
 The `openrouter_client.py` module handles both providers. Switch via `LLM_PROVIDER` env var (`ollama` or `openrouter`).
 
-### 2.2 Model assignments
+### 2.2 Model assignments and fallback chains
 
-| Layer | Local Dev (Ollama) | Production (OpenRouter) |
-|---|---|---|
-| Supervisor + Assembler | `gemma4:latest` | `anthropic/claude-sonnet-4` |
-| Triage + Red Flag + Guardrail | `llama3.1:8b` | `anthropic/claude-haiku-4-5` |
-| Deep-Dive + Lifestyle | `gemma4:latest` | `google/gemini-flash-2.0` |
+Agents reference a **role** (`fast_trio`, `deep_dive`, `assembler`), never a model ID. The client resolves roles to ordered chains and falls back automatically on provider failure.
+
+**OpenRouter chains (production):**
+
+| Role | Agents | Primary | Backup 1 | Backup 2 |
+|---|---|---|---|---|
+| `fast_trio` | Guardrail, Triage, Red Flag | `anthropic/claude-haiku-4-5` | `anthropic/claude-haiku-3-5` | `google/gemini-flash-2.0` |
+| `deep_dive` | Deep-Dive, Lifestyle | `google/gemini-flash-2.0` | `google/gemini-flash-1.5` | `anthropic/claude-haiku-4-5` |
+| `assembler` | Assembler | `anthropic/claude-sonnet-4` | `google/gemini-pro-2.0` | `google/gemini-flash-2.0` |
+| *(supervisor)* | Supervisor | — (pure Python, no LLM) | — | — |
+
+**Ollama chains (local dev) — ordered best → worst:**
+
+| Role | Primary | Backup 1 | Backup 2 |
+|---|---|---|---|
+| `fast_trio` | `gemma4:latest` | `qwen3:14b` | `llama3.1:8b` |
+| `deep_dive` | `gemma4:latest` | `qwen3:14b` | `llama3.1:8b` |
+| `assembler` | `gemma4:latest` | `qwen3:14b` | `llama3.1:8b` |
 
 ### 2.3 Ollama configuration
 - Base URL: `http://localhost:11434` (default)
 - Configurable via `OLLAMA_BASE_URL` env var
-- Models must be pulled before running: `ollama pull gemma4` and `ollama pull llama3.1:8b`
+- Models must be pulled before running: `ollama pull gemma4`, `ollama pull qwen3:14b`, `ollama pull llama3.1:8b`
 - Ollama does not support `response_format: json_object` — use prompt-level JSON enforcement only
 
 ### 2.4 OpenRouter configuration
 - Base URL: `https://openrouter.ai/api/v1`
 - API key via `OPENROUTER_API_KEY` env var
 - Uses `response_format: { type: "json_object" }` where model supports it
+
+### 2.5 Model chain configuration
+
+Chain definitions live in `backend/agents/model_config.py`. OpenRouter chains are overridable per-role via env vars (comma-separated model IDs). Ollama chains are code-defined only (local dev — no secret config needed).
+
+| Env var | Overrides role (OpenRouter only) |
+|---|---|
+| `HEALTHNAV_FAST_TRIO_MODELS` | `fast_trio` |
+| `HEALTHNAV_DEEP_DIVE_MODELS` | `deep_dive` |
+| `HEALTHNAV_ASSEMBLER_MODELS` | `assembler` |
+
+**Fallback trigger rules:**
+- Try next model on: `5xx` server error, timeout (after its 1 internal retry), rate limit (after its 2 internal retries).
+- Do **not** try next model on: malformed JSON — that is a prompt issue. JSON re-prompt retry runs against the same model.
+- All models exhausted → `AgentFailure("ALL_MODELS_EXHAUSTED")`. Supervisor applies §7.3 degradation rules.
+- Each model switch is logged: `event_type: "model_fallback"` with `{role, failed_model, next_model, reason}`.
 
 ---
 
@@ -580,78 +610,173 @@ Every event logged to stdout as structured JSON. Railway captures for retrieval.
 
 ## 9. Error Handling
 
-- **Timeout:** 30s per agent. Retry once. Fail → `AGENT_FAILURE`.
-- **Malformed JSON:** Pydantic validation. Retry once with stricter prompt. Fail → `AGENT_FAILURE`.
-- **429 rate limit (OpenRouter):** Exponential backoff (2s, 5s). Max 2 retries.
-- **Ollama connection error:** Log warning, raise `AGENT_FAILURE`. Ensure Ollama is running locally.
-- **5xx:** Retry once. Fail.
+- **Timeout:** 30s per agent. Retry once on same model. If still failing → try next model in chain (§2.5).
+- **Malformed JSON:** Pydantic validation. Retry once with stricter prompt against same model. Fail → `AGENT_FAILURE("MALFORMED_JSON")`. Does not trigger model chain fallback.
+- **429 rate limit (OpenRouter):** Exponential backoff (2s, 5s). Max 2 retries on same model. Then → try next model in chain.
+- **5xx server error:** Retry once on same model. Then → try next model in chain.
+- **Ollama connection error:** Logged as warning. Counts as server error → try next model in chain.
+- **All models exhausted:** `AgentFailure("ALL_MODELS_EXHAUSTED")`. Supervisor applies §7.3 degradation rules.
 - **Partial failures:** See §7.3. System prefers degraded card over complete failure.
 
 ---
 
 ## 10. Frontend Contract
 
-### 10.1 Screens
-1. **Input screen** — textarea (free text) + submit. Footer disclaimer always visible.
-2. **Loading screen** — live agent trace display, progress indicator (micro-engagement).
-3. **Follow-up screen** — options-based question components (see §10.3).
-4. **Result screen** — Doctor Prep Card + quadrant visual + completion state (micro-engagement).
-5. **Emergency screen** — high-contrast advisory, prominent "seek care now" CTA.
-6. **Redirect screen** — kind message, recommend professional consultation.
-7. **Error screen** — error message + retry button.
+> Full visual detail in `spec/UIDeisgn.md`. This section captures the contracts and rules the backend and routing logic depend on. The two documents must stay in sync.
 
-### 10.2 App state machine
+### 10.1 Tech stack (Sprint 3 decisions)
+| Concern | Choice | Replaces |
+|---|---|---|
+| Styling | Tailwind CSS + custom token config | Plain CSS |
+| App state | Zustand (`useInvestigationStore`) | Bare React state |
+| Data fetching | Custom hook `useInvestigation()` | Ad-hoc fetch |
+| Icons | Phosphor Icons | — |
+| Fonts | Fraunces (serif headings), Inter (body), JetBrains Mono (data) | — |
+
+### 10.2 Screens and components
+| Screen | Component | Triggered by |
+|---|---|---|
+| Input | `<SymptomInput />` | App start |
+| Loading | `<LoadingScreen />` | After submit / after follow-up submit |
+| Follow-up | `<QuestionWizard />` | `status: needs_followup` |
+| Result | `<PrepCard />` | `status: complete` |
+| Emergency | `<EmergencyScreen />` | `status: emergency` |
+| Redirect | `<RedirectScreen />` | `status: redirect` |
+| Error | `<ErrorScreen />` | `status: error` or network failure |
+
+### 10.3 App state machine
 ```
 input
   → loading
-  → (followup → loading)*
-  → result | emergency | redirect | error
+  → (wizard → loading)*
+  → prep_card | emergency | redirect | error
 ```
+State lives in Zustand. UI components are dumb — they receive props and emit events (`onNext`, `onBack`). `useInvestigation()` handles all API calls and dispatches state updates.
 
-### 10.3 Follow-up question rendering
-| Type | Component |
+### 10.4 Follow-up question rendering (`<QuestionWizard />`)
+| Type | Behaviour |
 |---|---|
-| `single_choice` | Button group, one selectable, teal highlight |
-| `multi_choice` | Checkbox group, multiple selectable |
-| `yes_no` | Two-button group (Yes / No) |
-| `scale` | Slider with min/max labels |
-| `allow_other_text=true` | "Other" option → reveals text input on select |
+| `single_choice` | Selectable list rows; selected row gets Burnt Sienna border highlight |
+| `multi_choice` | List rows; selected turns `bg-warm-elevated` with Sienna checkmark |
+| `yes_no` | Two large pill buttons; selected fills Burnt Sienna |
+| `scale` | Custom 1–10 slider; Sienna thumb, warm track, large serif number display |
+| `allow_other_text=true` | "Other" option reveals free-text input on select |
 
-### 10.4 Quadrant visual (result screen)
-- 2×2 grid, four quadrants labelled (Q1–Q4)
-- Plotted point showing user's symptom position
-- Active quadrant highlighted in accent colour
+One question at a time. Thin Warm Amber progress line at top of viewport. Step count in JetBrains Mono. "Continue" = primary button. "Back" = muted text link, never a button.
+
+### 10.5 Quadrant visual (`<PrepCard />`)
+- 2×2 grid, quadrants labelled Q1–Q4, coloured per §10.7
+- Plotted point shows symptom position; active quadrant highlighted
 - Quadrant label + recommended action displayed below grid
-- Static in v1. Interactive/animated in v2.
+- Point plots with a brief transition animation on reveal
+- Static in v1. Interactive with history overlay in v2.
 
-### 10.5 Micro-engagement states
-- **Loading screen:** Step indicator ("Investigating... 2 of 4 agents complete")
-- **Agent trace items:** Animate in one by one as agents complete
-- **Result screen:** Subtle completion animation when card appears
-- **Quadrant reveal:** Point plots with a brief transition animation
-- **Rules:** No celebratory language for emergency/redirect. No streak/badge language (Premium only).
+### 10.6 Micro-engagement and motion
+- **Easing curve:** `cubic-bezier(0.4, 0.0, 0.2, 1)` on all transitions
+- **Page transitions:** 400ms crossfade + subtle `translate-y-4 → translate-y-0` slide
+- **State changes (options):** 250ms crossfade. No scaling or "popping".
+- **Loading screen:** Step counter ("Investigating... 2 of 4 agents complete"); agent trace items animate in one by one; slow opacity pulse on skeleton blocks (0.6 → 0.8 over 2–3s). No spinners.
+- **Result screen:** Subtle completion animation when card appears; quadrant point plots with brief transition
+- **Rules:** No celebratory language on emergency or redirect screens. No streak/badge language (Premium only).
 
-### 10.6 API integration
+**Strict anti-patterns (never do):**
+- No chat bubbles, typing indicators, glowing borders, or sparkle icons
+- No bouncy/playful animations
+- No glassmorphism
+- No spinners
+
+### 10.7 Color system — "Warm Slate"
+
+**Dark mode (default):**
+| Token | Hex | Usage |
+|---|---|---|
+| `warm-charcoal` | `#1A1814` | App background |
+| `warm-surface` | `#242018` | Cards, inputs, containers |
+| `warm-elevated` | `#2E2A24` | Hover states, secondary cards, skeletons |
+| `warm-border` | `#3D3830` | Dividers, quiet borders (1px) |
+| `warm-off-white` | `#F0EBE3` | Headings, primary body copy |
+| `warm-muted` | `#9A9080` | Helper text, secondary labels, disabled |
+| `accent` | `#C4622D` | Primary CTAs, active states, focus rings |
+| `accent-hover` | `#A8501F` | Hover state on primary CTAs |
+
+**Semantic / triage quadrant colours (WCAG AA enforced):**
+| Quadrant | Colour | Hex | Text pair |
+|---|---|---|---|
+| Q1 Emergency | Deep Terracotta | `#B84C3A` | `warm-off-white` |
+| Q2 Warning | Warm Amber | `#C49A3C` | `warm-charcoal` |
+| Q3 Success | Sage Green | `#6B8F71` | `warm-off-white` |
+| Q4 Neutral | Warm Stone | `#7A7060` | `warm-off-white` |
+
+Blue-tinted blacks and cool greys are prohibited. No teal, cyan, neon purple, or gradient blues anywhere in the UI.
+
+### 10.8 Typography
+| Role | Font | Usage |
+|---|---|---|
+| Display / headings | Fraunces or Playfair Display (serif) | Editorial authority |
+| Body / UI | Inter or DM Sans (sans-serif) | Legibility |
+| Data / scores | JetBrains Mono (monospace) | Timestamps, character counts, severity badges |
+
+Scale: 12 / 14 / 16 / 20 / 24 / 32 / 48px. Tight line-heights on headings; generous on body. Uppercase monospace labels use generous letter-spacing.
+
+### 10.9 Screen-level specs
+
+**`<SymptomInput />`**
+- Centered, focused layout. Single large `textarea` on `bg-warm-surface`.
+- Focus shifts border to Burnt Sienna over 300ms. No default browser focus ring.
+- "Investigate" CTA enabled at ≥10 characters.
+- Footer trust signals (muted): "Your data stays private" · "Not a diagnosis tool. Always consult a licensed medical professional."
+
+**`<LoadingScreen />`**
+- Skeleton blocks in `bg-warm-elevated` with slow opacity pulse. No spinners.
+- Step counter in JetBrains Mono: "Investigating... N of 4 agents complete"
+- Agent trace items animate in one by one as each agent completes.
+
+**`<QuestionWizard />`** — see §10.4
+
+**`<PrepCard />`**
+- Styled as a printable medical brief. Elevated surface container.
+- Hero: date (monospace) + Triage Quadrant Badge (coloured per §10.7).
+- Sections: Summary · Key Findings · Questions for Doctor · Recommended Next Step. Separated by `border-warm-border` `<hr />` tags.
+- "Questions for Doctor" items use left border accent (`border-l-2 border-quadrant-q2`) on `bg-warm-elevated` rows.
+- CTAs: "Save as PDF" (outlined Sienna, **disabled in v1 — stub only**) · "Start Over" (text link).
+
+**`<EmergencyScreen />`**
+- Full-screen takeover. Total stillness — no animations.
+- Entire background: `bg-quadrant-q1` (Deep Terracotta).
+- Single large serif headline, calm and direct.
+- Primary CTA: "Call Emergency Services" → `tel:112`. Heavy `bg-warm-charcoal` button.
+- Secondary: "I'm Safe — Go Back" (low-opacity text link).
+
+**`<RedirectScreen />`**
+- Centered modal-style card on `bg-warm-charcoal`.
+- Non-accusatory copy explaining why the investigation halted.
+- Single primary button: "Restart Investigation".
+
+**`<ErrorScreen />`**
+- Error message in `warm-muted` text.
+- Single primary button: "Try Again" → retries with same `request_id`.
+
+### 10.10 API integration
 - Base URL: env var `VITE_API_BASE_URL`
 - `POST /investigate` with `Content-Type: application/json`
-- Generate UUID v4 `request_id` on first submit; persist in React state for follow-up calls
+- UUID v4 `request_id` generated on first submit; stored in Zustand, persisted across follow-up re-calls
 - Handle all 5 response statuses: `complete`, `needs_followup`, `emergency`, `redirect`, `error`
 
-### 10.7 Disclaimer rules
+### 10.11 Disclaimer rules
 | Screen | Disclaimer |
 |---|---|
-| Input screen footer | "HealthNav is a preparation tool, not a diagnosis. Always consult a licensed medical professional." |
+| Input screen footer | "Your data stays private. Not a diagnosis tool. Always consult a licensed medical professional." |
 | Result screen (prominent box) | Full disclaimer from §6 |
-| Emergency screen | Built into advisory |
+| Emergency screen | Built into advisory copy |
 | Redirect screen | "Please consult a healthcare professional for personalised advice." |
 | Every screen | Never hidden, never collapsed |
 
-### 10.8 Visual scope (v1)
-- Plain CSS, no design system
-- Single accent colour: teal (`#0D9488`)
-- Desktop-first, mobile-friendly
-- No PDF export (v2)
-- Route structure: `/` = input, `/result` = card (plan `/premium` route for v2)
+### 10.12 Visual scope (v1)
+- Tailwind CSS with custom Warm Slate token config
+- Accent: Burnt Sienna `#C4622D` (not teal)
+- Mobile-first, desktop-optimised
+- "Save as PDF" CTA rendered but disabled (PDF generation is v2)
+- Route structure: `/` = input, `/result` = card (stub `/premium` route planned for v2)
 
 ---
 
@@ -740,7 +865,7 @@ input
 *Red Flag, Deep-Dive, Lifestyle, Supervisor routing logic, Assembler + quadrant scoring.*
 
 ### Sprint 3 — Frontend
-*Vite scaffold, all screens, options-based questions, quadrant visual, micro-engagement, agent trace display.*
+*Vite + React scaffold, Tailwind CSS (Warm Slate tokens), Zustand store, `useInvestigation()` hook. All 7 screens per §10. `<QuestionWizard />` with all 4 question types. `<PrepCard />` with quadrant visual. `<LoadingScreen />` with agent trace animation. Micro-engagement per §10.6. Disabled "Save as PDF" stub.*
 
 ### Sprint 4 — Deploy + Polish
 *Final Railway + Vercel deploy, swap env to OpenRouter, CORS prod config, smoke tests, acceptance criteria run-through.*

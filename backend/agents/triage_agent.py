@@ -6,7 +6,7 @@ from pydantic import BaseModel, ValidationError
 
 from .openrouter_client import AgentFailure, OpenRouterClient
 
-_MODEL = "anthropic/claude-haiku-4-5"
+_MODEL_ROLE = "fast_trio"
 _TEMPERATURE = 0.2
 
 # Supervisor routing depends on these exact strings (spec §4.1)
@@ -54,7 +54,7 @@ class TriageAgent:
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": inp.symptom_description},
         ]
-        data = await self._client.chat(model=_MODEL, messages=messages, temperature=_TEMPERATURE)
+        data = await self._client.chat(role=_MODEL_ROLE, messages=messages, temperature=_TEMPERATURE)
         try:
             return TriageOutput.model_validate(data)
         except ValidationError as exc:

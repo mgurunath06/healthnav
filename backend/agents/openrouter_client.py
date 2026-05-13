@@ -5,31 +5,22 @@ import os
 import httpx
 from dotenv import load_dotenv
 
+from .model_config import get_model_chain
+
 load_dotenv()
 
 _OPENROUTER_BASE = "https://openrouter.ai/api/v1"
-_RATE_LIMIT_DELAYS = [2.0, 5.0]  # seconds between 429 retries (spec §7.1)
+_RATE_LIMIT_DELAYS = [2.0, 5.0]  # seconds between 429 retries (spec §9)
 
 _PLACEHOLDER_KEY = "your_key_here"
-
-# Maps OpenRouter model IDs → local Ollama equivalents (spec §2.2)
-_OLLAMA_MODEL_MAP: dict[str, str] = {
-    "anthropic/claude-haiku-4-5": "llama3.1:8b",   # fast trio: Guardrail, Triage, Red Flag
-    "anthropic/claude-sonnet-4":  "gemma4:latest",  # Assembler
-    "google/gemini-flash-2.0":    "gemma4:latest",  # Deep-Dive, Lifestyle
-}
 
 
 def _ollama_base() -> str:
     return os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 
-def _ollama_fallback_model() -> str:
-    """Used only when an unmapped model name is passed in Ollama mode."""
-    return os.getenv("OLLAMA_MODEL", "llama3.1:8b")
-
 
 class AgentFailure(Exception):
-    """Raised when an agent call exhausts all retries."""
+    """Raised when an agent call exhausts all retries or all models in chain."""
     def __init__(self, code: str):
         self.code = code
         super().__init__(code)
@@ -38,7 +29,6 @@ class AgentFailure(Exception):
 class OpenRouterClient:
     def __init__(self):
         key = os.getenv("OPENROUTER_API_KEY", "")
-        # Fall back to Ollama when the key is absent or still the placeholder
         self._use_ollama = not key or key == _PLACEHOLDER_KEY
         self._api_key = key if not self._use_ollama else ""
         if self._use_ollama:
@@ -46,27 +36,53 @@ class OpenRouterClient:
                 "event": "backend_selection",
                 "backend": "ollama",
                 "base_url": _ollama_base(),
-                "model_map": _OLLAMA_MODEL_MAP,
-                "fallback_model": _ollama_fallback_model(),
                 "reason": "OPENROUTER_API_KEY not set — using local Ollama",
             }), flush=True)
 
     async def chat(
         self,
-        model: str,
+        role: str,
         messages: list[dict],
         temperature: float = 0.3,
         timeout: float = 30.0,
     ) -> dict:
         """
-        Call OpenRouter chat completions and return parsed JSON.
+        Call the LLM and return parsed JSON.
 
-        Retry policy (spec §7.1):
-        - Timeout:       retry once → AgentFailure("LLM_TIMEOUT")
-        - Malformed JSON: retry once with stricter prompt → AgentFailure("MALFORMED_JSON")
-        - 429:           backoff 2s / 5s, max 2 retries → AgentFailure("RATE_LIMITED")
-        - 5xx:           retry once → AgentFailure("SERVER_ERROR")
+        Tries each model in the role's chain (spec §2.5):
+        - Provider failures (5xx, timeout, rate limit exhausted) → try next model.
+        - Malformed JSON → re-prompt same model once, then AgentFailure("MALFORMED_JSON").
+        - All models exhausted → AgentFailure("ALL_MODELS_EXHAUSTED").
         """
+        chain = get_model_chain(role, self._use_ollama)
+        if not chain:
+            raise AgentFailure("ALL_MODELS_EXHAUSTED")
+
+        last_error_code = "ALL_MODELS_EXHAUSTED"
+
+        for i, model in enumerate(chain):
+            try:
+                return await self._try_model(model, messages, temperature, timeout)
+            except AgentFailure as exc:
+                last_error_code = exc.code
+                if exc.code == "MALFORMED_JSON":
+                    # Prompt issue — don't switch models
+                    raise
+                # Provider failure — log and try next
+                next_model = chain[i + 1] if i + 1 < len(chain) else None
+                self._log_fallback(role, model, next_model, exc.code)
+                continue
+
+        raise AgentFailure(last_error_code)
+
+    async def _try_model(
+        self,
+        model: str,
+        messages: list[dict],
+        temperature: float,
+        timeout: float,
+    ) -> dict:
+        """Run one model with its own retry budget (timeout x1, rate-limit x2, 5xx x1)."""
         current_messages = list(messages)
         rate_limit_count = 0
         request_fail_count = 0
@@ -110,7 +126,6 @@ class OpenRouterClient:
         if self._use_ollama:
             url = f"{_ollama_base()}/chat/completions"
             headers = {"Content-Type": "application/json"}
-            actual_model = _OLLAMA_MODEL_MAP.get(model, _ollama_fallback_model())
         else:
             url = f"{_OPENROUTER_BASE}/chat/completions"
             headers = {
@@ -119,14 +134,13 @@ class OpenRouterClient:
                 "HTTP-Referer": "https://healthnav.app",
                 "X-Title": "HealthNav",
             }
-            actual_model = model
 
         body: dict = {
-            "model": actual_model,
+            "model": model,
             "messages": messages,
             "temperature": temperature,
         }
-        # Ollama does not support response_format (spec §2.3) — prompt-level enforcement only
+        # Ollama does not support response_format (spec §2.3)
         if not self._use_ollama:
             body["response_format"] = {"type": "json_object"}
 
@@ -147,6 +161,21 @@ class OpenRouterClient:
             return _strip_think_tags(content)
         except (KeyError, IndexError) as exc:
             raise AgentFailure("MALFORMED_JSON") from exc
+
+    def _log_fallback(
+        self,
+        role: str,
+        failed_model: str,
+        next_model: str | None,
+        reason: str,
+    ) -> None:
+        print(json.dumps({
+            "event_type": "model_fallback",
+            "role": role,
+            "failed_model": failed_model,
+            "next_model": next_model,
+            "reason": reason,
+        }), flush=True)
 
 
 def _strip_think_tags(text: str) -> str:

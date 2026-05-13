@@ -5,9 +5,11 @@ import hashlib
 import json
 import time
 from datetime import datetime, timezone
-from typing import Any
 
+from .assembler_agent import AssemblerAgent, AssemblerInput, AssemblerOutput
+from .deep_dive_agent import DeepDiveAgent, DeepDiveInput, DeepDiveOutput
 from .guardrail_agent import GuardrailAgent, GuardrailInput, GuardrailOutput
+from .lifestyle_agent import LifestyleAgent, LifestyleInput, LifestyleOutput
 from .openrouter_client import AgentFailure
 from .red_flag_detector import RedFlagDetector, RedFlagInput, RedFlagOutput
 from .triage_agent import TriageAgent, TriageInput, TriageOutput
@@ -18,6 +20,9 @@ class Supervisor:
         self._guardrail = GuardrailAgent()
         self._triage = TriageAgent()
         self._red_flag = RedFlagDetector()
+        self._deep_dive = DeepDiveAgent()
+        self._lifestyle = LifestyleAgent()
+        self._assembler = AssemblerAgent()
 
     async def run(
         self,
@@ -56,22 +61,37 @@ class Supervisor:
                 trace,
             )
 
-        # ── Phase 3: Deep-Dive (TODO Sprint 2) ───────────────────────────────
-        # deep_dive = await self._run_deep_dive(request_id, symptom_description, triage, follow_up_answers, trace)
-        # if deep_dive is not None and deep_dive.needs_followup and not follow_up_answers:
-        #     return self._needs_followup(request_id, deep_dive.followup_questions, trace)
+        # ── Phase 3: Deep-Dive ────────────────────────────────────────────────
+        deep_dive = await self._run_deep_dive(
+            request_id, symptom_description, triage, follow_up_answers, trace
+        )
+        if deep_dive is not None and deep_dive.needs_followup and not follow_up_answers:
+            return self._needs_followup(request_id, deep_dive.followup_questions, trace)
 
-        # ── Phase 4: Lifestyle (TODO Sprint 2) ───────────────────────────────
-        # if self._should_run_lifestyle(triage, deep_dive):
-        #     lifestyle = await self._run_lifestyle(request_id, symptom_description, deep_dive, follow_up_answers, trace)
+        # ── Phase 4: Lifestyle ────────────────────────────────────────────────
+        lifestyle: LifestyleOutput | None = None
+        if deep_dive is not None and self.should_run_lifestyle(triage, deep_dive):
+            lifestyle = await self._run_lifestyle(
+                request_id, symptom_description, deep_dive, trace
+            )
+            # Lifestyle may also request follow-up (spec §7.1 path 8)
+            if lifestyle is not None and lifestyle.needs_followup:
+                if not _has_answers_for(lifestyle.followup_questions, follow_up_answers):
+                    return self._needs_followup(request_id, lifestyle.followup_questions, trace)
 
-        # ── Phase 5: Assembler (TODO Sprint 2) ───────────────────────────────
-        # doctor_prep_card = await self._run_assembler(request_id, triage, deep_dive, lifestyle, trace)
-        # return self._complete(request_id, doctor_prep_card, trace)
-
-        # Temporary stub until Sprint 2 agents are implemented
-        self._log_routing(request_id, "continue: parallel phase complete — deep-dive not yet implemented", trace)
-        return self._stub_incomplete(request_id, trace)
+        # ── Phase 5: Assembler ────────────────────────────────────────────────
+        agents_run = [
+            e["agent"] for e in trace
+            if isinstance(e.get("status"), str) and e["status"] == "ok"
+        ]
+        assembler_out = await self._run_assembler(
+            request_id, symptom_description, triage, red_flag,
+            deep_dive, lifestyle, agents_run, trace,
+        )
+        if assembler_out is None:
+            # Assembler failed → error with raw outputs (spec §7.3)
+            return self._assembler_error(request_id, trace)
+        return self._complete(request_id, assembler_out, trace)
 
     # ── Parallel runner ───────────────────────────────────────────────────────
 
@@ -186,17 +206,161 @@ class Supervisor:
         ordered_trace = [e for e in [guardrail_entry, triage_entry, red_flag_entry] if e is not None]
         return guardrail_result, triage_result, red_flag_result, ordered_trace
 
-    # ── Lifestyle routing rule (pure logic, called in Sprint 2) ──────────────
+    # ── Deep-Dive runner ──────────────────────────────────────────────────────
+
+    async def _run_deep_dive(
+        self,
+        request_id: str,
+        symptom_description: str,
+        triage: TriageOutput | None,
+        follow_up_answers: dict[str, str],
+        trace: list[dict],
+    ) -> DeepDiveOutput | None:
+        started = _iso_now()
+        t = _ms()
+        self._log(request_id, "agent_started", agent="deep_dive")
+        category = triage.primary_symptom_category if triage else "general"
+        try:
+            result = await self._deep_dive.run(
+                DeepDiveInput(
+                    symptom_description=symptom_description,
+                    primary_symptom_category=category,
+                    previous_answers=follow_up_answers,
+                )
+            )
+            dur = _ms() - t
+            self._log(request_id, "agent_completed", agent="deep_dive", duration_ms=dur)
+            trace.append({
+                "agent": "deep_dive",
+                "started_at": started,
+                "duration_ms": dur,
+                "status": "ok",
+                "decision": f"needs_followup={result.needs_followup}, severity={result.structured_findings.severity}",
+            })
+            return result
+        except Exception as exc:
+            dur = _ms() - t
+            code = exc.code if isinstance(exc, AgentFailure) else "AGENT_FAILURE"
+            self._log(request_id, "agent_failed", agent="deep_dive", duration_ms=dur, status=code)
+            trace.append({
+                "agent": "deep_dive",
+                "started_at": started,
+                "duration_ms": dur,
+                "status": "failed",
+                "decision": "failed — continuing with partial data",
+            })
+            return None
+
+    # ── Lifestyle runner ──────────────────────────────────────────────────────
+
+    async def _run_lifestyle(
+        self,
+        request_id: str,
+        symptom_description: str,
+        deep_dive: DeepDiveOutput,
+        trace: list[dict],
+    ) -> LifestyleOutput | None:
+        started = _iso_now()
+        t = _ms()
+        self._log(request_id, "agent_started", agent="lifestyle")
+        try:
+            result = await self._lifestyle.run(
+                LifestyleInput(
+                    symptom_description=symptom_description,
+                    deep_dive_findings=deep_dive.structured_findings,
+                )
+            )
+            dur = _ms() - t
+            self._log(request_id, "agent_completed", agent="lifestyle", duration_ms=dur)
+            trace.append({
+                "agent": "lifestyle",
+                "started_at": started,
+                "duration_ms": dur,
+                "status": "ok",
+                "decision": (
+                    f"correlations={len(result.lifestyle_correlations)}, "
+                    f"needs_followup={result.needs_followup}"
+                ),
+            })
+            return result
+        except Exception as exc:
+            dur = _ms() - t
+            code = exc.code if isinstance(exc, AgentFailure) else "AGENT_FAILURE"
+            self._log(request_id, "agent_failed", agent="lifestyle", duration_ms=dur, status=code)
+            trace.append({
+                "agent": "lifestyle",
+                "started_at": started,
+                "duration_ms": dur,
+                "status": "failed",
+                "decision": "failed — skipping lifestyle (spec §7.3)",
+            })
+            return None  # Skip silently, continue to assembler
+
+    # ── Assembler runner ──────────────────────────────────────────────────────
+
+    async def _run_assembler(
+        self,
+        request_id: str,
+        symptom_description: str,
+        triage: TriageOutput | None,
+        red_flag: RedFlagOutput | None,
+        deep_dive: DeepDiveOutput | None,
+        lifestyle: LifestyleOutput | None,
+        agents_run: list[str],
+        trace: list[dict],
+    ) -> AssemblerOutput | None:
+        started = _iso_now()
+        t = _ms()
+        self._log(request_id, "agent_started", agent="assembler")
+        try:
+            result = await self._assembler.run(
+                AssemblerInput(
+                    symptom_description=symptom_description,
+                    triage_output=triage,
+                    red_flag_output=red_flag,
+                    deep_dive_output=deep_dive,
+                    lifestyle_output=lifestyle,
+                    agents_run=agents_run,
+                )
+            )
+            dur = _ms() - t
+            qid = result.doctor_prep_card.quadrant.quadrant_id
+            self._log(request_id, "agent_completed", agent="assembler", duration_ms=dur)
+            trace.append({
+                "agent": "assembler",
+                "started_at": started,
+                "duration_ms": dur,
+                "status": "ok",
+                "decision": f"quadrant={qid}",
+            })
+            return result
+        except Exception as exc:
+            dur = _ms() - t
+            code = exc.code if isinstance(exc, AgentFailure) else "AGENT_FAILURE"
+            self._log(request_id, "agent_failed", agent="assembler", duration_ms=dur, status=code)
+            trace.append({
+                "agent": "assembler",
+                "started_at": started,
+                "duration_ms": dur,
+                "status": "failed",
+                "decision": "assembler failed",
+            })
+            return None
+
+    # ── Lifestyle routing rule ────────────────────────────────────────────────
 
     @staticmethod
-    def should_run_lifestyle(triage: TriageOutput | None, deep_dive_findings: dict) -> bool:
-        """Deterministic rule from spec §4.1."""
+    def should_run_lifestyle(triage: TriageOutput | None, deep_dive: DeepDiveOutput | None) -> bool:
+        """Deterministic routing rule — spec §7.1."""
         if triage and triage.primary_symptom_category in ("general", "neurological", "musculoskeletal"):
             return True
-        triggers = [t.lower() for t in deep_dive_findings.get("triggers", [])]
+        if deep_dive is None:
+            return False
+        findings = deep_dive.structured_findings
+        triggers = [t.lower() for t in findings.triggers]
         if any(kw in t for t in triggers for kw in ("stress", "screen_time", "screen", "work", "sleep")):
             return True
-        associated = [s.lower() for s in deep_dive_findings.get("associated_symptoms", [])]
+        associated = [s.lower() for s in findings.associated_symptoms]
         if any(s in ("fatigue", "headache") for s in associated):
             return True
         return False
@@ -229,15 +393,38 @@ class Supervisor:
         self._log(request_id, "response_sent", metadata={"status": "emergency"})
         return response
 
-    def _stub_incomplete(self, request_id: str, trace: list[dict]) -> dict:
+    def _needs_followup(self, request_id: str, questions: list, trace: list[dict]) -> dict:
+        self._log_routing(request_id, "needs_followup: deep-dive requested more info", trace)
+        response = {
+            "status": "needs_followup",
+            "request_id": request_id,
+            "questions": [q.model_dump(exclude_none=True) for q in questions],
+            "agent_trace": trace,
+        }
+        self._log(request_id, "response_sent", metadata={"status": "needs_followup"})
+        return response
+
+    def _complete(self, request_id: str, assembler_out: AssemblerOutput, trace: list[dict]) -> dict:
+        self._log_routing(request_id, "complete", trace)
+        response = {
+            "status": "complete",
+            "request_id": request_id,
+            "doctor_prep_card": assembler_out.doctor_prep_card.model_dump(),
+            "agent_trace": trace,
+        }
+        self._log(request_id, "response_sent", metadata={"status": "complete"})
+        return response
+
+    def _assembler_error(self, request_id: str, trace: list[dict]) -> dict:
+        self._log_routing(request_id, "error: assembler failed", trace)
         response = {
             "status": "error",
             "request_id": request_id,
-            "error_code": "NOT_IMPLEMENTED",
-            "message": "Deep-dive and assembler agents not yet built (Sprint 2).",
+            "error_code": "AGENT_FAILURE",
+            "message": "Failed to generate Doctor Prep Card. Please try again.",
             "agent_trace": trace,
         }
-        self._log(request_id, "response_sent", metadata={"status": "error", "reason": "not_implemented"})
+        self._log(request_id, "response_sent", metadata={"status": "error", "reason": "assembler_failed"})
         return response
 
     # ── Logging ───────────────────────────────────────────────────────────────
@@ -276,3 +463,7 @@ def _ms() -> int:
 
 def _sha256_prefix(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+def _has_answers_for(questions: list, answers: dict[str, str]) -> bool:
+    """True if at least one answer from this question set is present in the answers dict."""
+    return any(q.id in answers for q in questions)

@@ -145,10 +145,16 @@ class DeepDiveAgent:
         history_section = ""
         if inp.follow_up_history:
             lines = []
+            already_asked = []
             for i, qa in enumerate(inp.follow_up_history, 1):
                 lines.append(f"Q{i}: {qa.question_text}")
                 lines.append(f"A{i}: {qa.answer}")
-            history_section = "\n\nConversation so far:\n" + "\n".join(lines)
+                already_asked.append(f'  - "{qa.question_text}"')
+            history_section = (
+                "\n\nConversation so far:\n" + "\n".join(lines)
+                + "\n\nALREADY ASKED — you MUST NOT ask these again or any question on the same topic:\n"
+                + "\n".join(already_asked)
+            )
 
         user_content = (
             f"Symptom description: {inp.symptom_description}\n"

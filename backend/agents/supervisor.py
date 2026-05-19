@@ -66,7 +66,9 @@ class Supervisor:
             request_id, symptom_description, triage, follow_up_history, trace
         )
         if deep_dive is not None and deep_dive.needs_followup:
-            return self._needs_followup(request_id, deep_dive.followup_questions, trace, deep_dive.topic_overview)
+            deduped = _dedup_questions(deep_dive.followup_questions, follow_up_history)
+            if deduped:
+                return self._needs_followup(request_id, deduped, trace, deep_dive.topic_overview)
 
         # ── Phase 4: Lifestyle ────────────────────────────────────────────────
         lifestyle: LifestyleOutput | None = None
@@ -467,3 +469,19 @@ def _sha256_prefix(text: str) -> str:
 def _has_answers_for(questions: list, answers: dict[str, str]) -> bool:
     """True if at least one answer from this question set is present in the answers dict."""
     return any(q.id in answers for q in questions)
+
+def _dedup_questions(questions: list, history: list) -> list:
+    """Filter out questions whose text is too similar to already-asked ones."""
+    if not history:
+        return questions
+    asked_texts = [h.get("question_text", "").lower() for h in history]
+    unique = []
+    for q in questions:
+        q_words = set(q.question.lower().split())
+        is_dup = any(
+            len(q_words & set(asked.split())) / max(len(q_words), 1) > 0.6
+            for asked in asked_texts
+        )
+        if not is_dup:
+            unique.append(q)
+    return unique

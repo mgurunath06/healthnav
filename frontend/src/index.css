@@ -60,6 +60,13 @@
 .animate-float        { animation: float 3.5s ease-in-out infinite; }
 .animate-pulse-ring   { animation: pulse-ring 2.5s ease-out infinite; }
 
+/* Print */
+@media print {
+  body { background: #fff !important; color: #000 !important; }
+  header, footer, .no-print { display: none !important; }
+  .print-card { box-shadow: none !important; border: 1px solid #ccc !important; }
+}
+
 /* Base */
 *, *::before, *::after {
   box-sizing: border-box;

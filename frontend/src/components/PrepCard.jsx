@@ -1,3 +1,5 @@
+import { useRef, useState } from 'react'
+import html2canvas from 'html2canvas'
 import { useInvestigationStore } from '../store/useInvestigationStore'
 import { useInvestigation } from '../hooks/useInvestigation'
 import Header from './Header'
@@ -12,12 +14,51 @@ const QUADRANT_STYLES = {
 export default function PrepCard() {
   const apiResponse = useInvestigationStore((s) => s.apiResponse)
   const { reset } = useInvestigation()
+  const cardRef = useRef(null)
+  const [sharing, setSharing] = useState(false)
 
   const card = apiResponse?.doctor_prep_card
   if (!card) return null
 
   const { quadrant } = card
   const qStyle = QUADRANT_STYLES[quadrant?.quadrant_id] ?? QUADRANT_STYLES.Q4
+
+  function handlePdf() {
+    window.print()
+  }
+
+  async function handleShare() {
+    if (!cardRef.current) return
+    setSharing(true)
+    try {
+      const canvas = await html2canvas(cardRef.current, {
+        backgroundColor: '#242018',
+        scale: 2,
+        useCORS: true,
+      })
+      canvas.toBlob(async (blob) => {
+        const file = new File([blob], 'healthnav-prep-card.png', { type: 'image/png' })
+        if (navigator.share && navigator.canShare?.({ files: [file] })) {
+          await navigator.share({
+            title: 'My HealthNav Doctor Prep Card',
+            text: 'Here is my symptom investigation prep card from HealthNav.',
+            files: [file],
+          })
+        } else {
+          // Fallback: download the image
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = 'healthnav-prep-card.png'
+          a.click()
+          URL.revokeObjectURL(url)
+        }
+        setSharing(false)
+      }, 'image/png')
+    } catch {
+      setSharing(false)
+    }
+  }
   const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase()
 
   return (
@@ -28,7 +69,7 @@ export default function PrepCard() {
         <div className="w-full max-w-2xl mx-auto">
 
           {/* Card container */}
-          <div className="bg-warm-surface rounded-2xl border border-warm-border shadow-matte overflow-hidden">
+          <div ref={cardRef} className="bg-warm-surface rounded-2xl border border-warm-border shadow-matte overflow-hidden print-card">
 
             {/* ── Hero ── */}
             <div className="px-8 pt-8 pb-6 border-b border-warm-border flex items-start justify-between gap-4">
@@ -169,13 +210,22 @@ export default function PrepCard() {
           </div>
 
           {/* ── CTAs ── */}
-          <div className="mt-6 flex items-center justify-between">
-            <button
-              disabled
-              className="px-5 py-2.5 rounded-lg border border-accent text-accent font-sans text-sm font-medium opacity-40 cursor-not-allowed"
-            >
-              Save as PDF
-            </button>
+          <div className="mt-6 flex items-center justify-between no-print">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handlePdf}
+                className="px-5 py-2.5 rounded-lg border border-accent text-accent font-sans text-sm font-medium hover:bg-accent/10 transition-colors duration-250"
+              >
+                Save as PDF
+              </button>
+              <button
+                onClick={handleShare}
+                disabled={sharing}
+                className="px-5 py-2.5 rounded-lg border border-warm-border text-warm-muted font-sans text-sm font-medium hover:border-warm-off-white hover:text-warm-off-white transition-colors duration-250 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {sharing ? 'Capturing…' : '↗ Share Card'}
+              </button>
+            </div>
             <button
               onClick={reset}
               className="font-sans text-sm text-warm-muted hover:text-warm-off-white transition-colors duration-250"

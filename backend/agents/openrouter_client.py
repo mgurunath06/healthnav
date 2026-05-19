@@ -154,11 +154,12 @@ class OpenRouterClient:
             raise _RateLimitError()
         if response.status_code >= 500:
             raise _ServerError()
-        response.raise_for_status()
+        if response.status_code >= 400:
+            raise _ServerError()
 
         try:
             content = response.json()["choices"][0]["message"]["content"]
-            return _strip_think_tags(content)
+            return _extract_json(_strip_think_tags(content))
         except (KeyError, IndexError) as exc:
             raise AgentFailure("MALFORMED_JSON") from exc
 
@@ -182,6 +183,15 @@ def _strip_think_tags(text: str) -> str:
     """Remove <think>...</think> blocks emitted by reasoning models (e.g. Qwen3)."""
     import re
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+
+def _extract_json(text: str) -> str:
+    """Extract JSON from potential markdown code fences."""
+    import re
+    match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+    if match:
+        return match.group(1).strip()
+    return text
 
 
 def _append_json_reminder(messages: list[dict]) -> list[dict]:

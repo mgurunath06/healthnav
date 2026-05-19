@@ -6,11 +6,13 @@ export const useInvestigationStore = create((set) => ({
   symptomDescription: '',
   followUpHistory: [],
   apiResponse: null,
-  topicOverview: null,   // cached from first deep-dive response, shown in right panel
+  topicOverview: null,
   error: null,
+  investigationStartedAt: null,
 
   setScreen: (screen) => set({ screen }),
   setRequestId: (requestId) => set({ requestId }),
+  setInvestigationStartedAt: (ts) => set({ investigationStartedAt: ts }),
   setSymptomDescription: (symptomDescription) => set({ symptomDescription }),
   appendFollowUp: (item) => set((s) => ({ followUpHistory: [...s.followUpHistory, item] })),
   setApiResponse: (apiResponse) => set({ apiResponse }),
@@ -25,5 +27,6 @@ export const useInvestigationStore = create((set) => ({
     apiResponse: null,
     topicOverview: null,
     error: null,
+    investigationStartedAt: null,
   }),
 }))

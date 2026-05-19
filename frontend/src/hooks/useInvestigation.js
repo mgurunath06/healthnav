@@ -11,6 +11,7 @@ export function useInvestigation() {
     if (!requestId) {
       requestId = uuidv4()
       store.setRequestId(requestId)
+      store.setInvestigationStartedAt(Date.now())
     }
 
     store.setSymptomDescription(symptomDescription)

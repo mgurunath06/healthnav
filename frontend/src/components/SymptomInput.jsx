@@ -44,9 +44,11 @@ export default function SymptomInput() {
       <main className="flex-1 flex flex-col items-center justify-center px-4 py-12">
         <div className="w-full max-w-2xl">
 
-          {/* Logo hero */}
+          {/* Animated icon */}
           <div className="flex justify-center mb-8 animate-float">
-            <img src="/logo.png" alt="HealthNav" className="h-36 w-auto object-contain drop-shadow-lg" />
+            <div className="animate-pulse-ring w-20 h-20 rounded-2xl bg-accent/10 border border-accent/25 flex items-center justify-center shadow-matte">
+              <span className="text-4xl select-none">🩺</span>
+            </div>
           </div>
 
           {/* Hero copy */}

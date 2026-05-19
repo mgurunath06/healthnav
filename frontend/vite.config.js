@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [tailwindcss(), react()],
   server: {
     port: 5173,
+    allowedHosts: true,
     proxy: {
       '/investigate': 'http://localhost:8000',
       '/health': 'http://localhost:8000',

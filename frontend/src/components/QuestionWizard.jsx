@@ -63,11 +63,6 @@ export default function QuestionWizard() {
     <div className="min-h-dvh bg-warm-charcoal flex flex-col">
       <Header />
 
-      {/* Amber progress line */}
-      <div className="h-px bg-warm-border w-full">
-        <div className="h-full bg-quadrant-q2 opacity-70" style={{ width: `${Math.min(roundNumber * 15, 90)}%`, transition: 'width 0.6s cubic-bezier(0.4,0,0.2,1)' }} />
-      </div>
-
       {/* Three-column body */}
       <div className="flex flex-1 overflow-hidden">
 
@@ -95,11 +90,16 @@ export default function QuestionWizard() {
             </ol>
           )}
 
-          {/* Round badge */}
-          <div className="px-5 py-4 border-t border-warm-border">
-            <span className="font-mono text-xs text-warm-muted">
-              Follow-up {roundNumber}
-            </span>
+          {/* Progress arc */}
+          <div className="px-5 py-5 border-t border-warm-border flex flex-col items-center gap-3">
+            <ProgressArc completed={followUpHistory.length} />
+            <p className="font-mono text-xs text-warm-muted text-center">
+              {followUpHistory.length === 0
+                ? 'Investigation starting…'
+                : followUpHistory.length === 1
+                  ? '1 question answered'
+                  : `${followUpHistory.length} questions answered`}
+            </p>
           </div>
         </aside>
 
@@ -330,6 +330,57 @@ function CenterLoading() {
         ))}
       </div>
     </div>
+  )
+}
+
+function ProgressArc({ completed }) {
+  const SIZE = 88
+  const STROKE = 6
+  const R = (SIZE - STROKE) / 2
+  const CIRCUMFERENCE = 2 * Math.PI * R
+  const ARC_DEGREES = 240
+  const ARC_FRAC = ARC_DEGREES / 360
+  const arcLen = CIRCUMFERENCE * ARC_FRAC
+  const gapLen = CIRCUMFERENCE - arcLen
+
+  // Logarithmic fill: grows quickly at first, slows down — never implies a fixed total
+  const progress = completed === 0 ? 0 : Math.log(completed + 1) / Math.log(completed + 4)
+  const filled = arcLen * progress
+
+  const rotation = 150 - 90
+
+  return (
+    <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} style={{ overflow: 'visible' }}>
+      <circle
+        cx={SIZE / 2} cy={SIZE / 2} r={R}
+        fill="none"
+        stroke="var(--color-warm-elevated)"
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+        strokeDasharray={`${arcLen} ${gapLen}`}
+        strokeDashoffset={0}
+        transform={`rotate(${rotation} ${SIZE / 2} ${SIZE / 2})`}
+      />
+      <circle
+        cx={SIZE / 2} cy={SIZE / 2} r={R}
+        fill="none"
+        stroke="var(--color-quadrant-q2)"
+        strokeWidth={STROKE}
+        strokeLinecap="round"
+        strokeDasharray={`${filled} ${CIRCUMFERENCE - filled}`}
+        strokeDashoffset={0}
+        transform={`rotate(${rotation} ${SIZE / 2} ${SIZE / 2})`}
+        style={{ transition: 'stroke-dasharray 0.6s cubic-bezier(0.4,0,0.2,1)' }}
+      />
+      <text
+        x={SIZE / 2} y={SIZE / 2}
+        textAnchor="middle" dominantBaseline="middle"
+        fill="var(--color-warm-off-white)"
+        fontFamily="var(--font-serif)" fontSize="22" fontWeight="300"
+      >
+        {completed}
+      </text>
+    </svg>
   )
 }
 

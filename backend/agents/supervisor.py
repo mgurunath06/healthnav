@@ -62,14 +62,17 @@ class Supervisor:
             )
 
         # ── Phase 3: Deep-Dive ────────────────────────────────────────────────
-        _MAX_FOLLOWUP = 5
+        _MAX_FOLLOWUP = 10  # absolute runaway ceiling only
         deep_dive = await self._run_deep_dive(
             request_id, symptom_description, triage, follow_up_history, trace
         )
         if deep_dive is not None and deep_dive.needs_followup and len(follow_up_history) < _MAX_FOLLOWUP:
-            deduped = _dedup_questions(deep_dive.followup_questions, follow_up_history)
-            if deduped:
-                return self._needs_followup(request_id, deduped, trace, deep_dive.topic_overview)
+            # Stop early if key clinical dimensions are already covered
+            if not _findings_sufficient(deep_dive.structured_findings):
+                deduped = _dedup_questions(deep_dive.followup_questions, follow_up_history)
+                filtered = _filter_saturated_topics(deduped, follow_up_history)
+                if filtered:
+                    return self._needs_followup(request_id, filtered, trace, deep_dive.topic_overview)
 
         # ── Phase 4: Lifestyle ────────────────────────────────────────────────
         lifestyle: LifestyleOutput | None = None
@@ -79,7 +82,9 @@ class Supervisor:
             )
             # Lifestyle may also request follow-up (spec §7.1 path 8)
             if lifestyle is not None and lifestyle.needs_followup and len(follow_up_history) < _MAX_FOLLOWUP:
-                return self._needs_followup(request_id, lifestyle.followup_questions, trace)
+                lf_filtered = _filter_saturated_topics(lifestyle.followup_questions, follow_up_history)
+                if lf_filtered:
+                    return self._needs_followup(request_id, lf_filtered, trace)
 
         # ── Phase 5: Assembler ────────────────────────────────────────────────
         agents_run = [
@@ -486,3 +491,52 @@ def _dedup_questions(questions: list, history: list) -> list:
         if not is_dup:
             unique.append(q)
     return unique
+
+
+# Topic clusters — keyword sets that define each clinical dimension
+_TOPIC_CLUSTERS: dict[str, list[str]] = {
+    "sleep":      ["sleep", "sleeping", "night", "rest", "insomnia", "awake", "hours"],
+    "stress":     ["stress", "anxiety", "worry", "tense", "tension", "mental", "nervous"],
+    "pain":       ["pain", "ache", "hurt", "sore", "sharp", "dull", "throb", "burning", "numb"],
+    "duration":   ["long", "started", "began", "ago", "since", "week", "day", "month", "year", "when"],
+    "triggers":   ["trigger", "cause", "worse", "worsens", "brings", "after", "during", "activity"],
+    "relief":     ["better", "relief", "helps", "medication", "painkiller", "ibuprofen", "paracetamol"],
+    "lifestyle":  ["exercise", "diet", "screen", "work", "food", "drink", "alcohol", "caffeine", "posture"],
+    "history":    ["before", "previously", "history", "past", "condition", "diagnosed", "family"],
+    "associated": ["also", "alongside", "other", "nausea", "dizziness", "fever", "fatigue", "vision"],
+}
+
+
+def _question_topics(text: str) -> set[str]:
+    words = text.lower().split()
+    topics = set()
+    for topic, keywords in _TOPIC_CLUSTERS.items():
+        if any(kw in word for word in words for kw in keywords):
+            topics.add(topic)
+    return topics
+
+
+def _filter_saturated_topics(questions: list, history: list) -> list:
+    """Remove questions whose topic cluster already has 2+ questions in history."""
+    topic_counts: dict[str, int] = {}
+    for h in history:
+        for t in _question_topics(h.get("question_text", "")):
+            topic_counts[t] = topic_counts.get(t, 0) + 1
+
+    result = []
+    for q in questions:
+        q_topics = _question_topics(q.question)
+        saturated = q_topics and all(topic_counts.get(t, 0) >= 2 for t in q_topics)
+        if not saturated:
+            result.append(q)
+    return result
+
+
+def _findings_sufficient(findings) -> bool:
+    """True when core clinical dimensions are covered — safe to stop asking."""
+    return (
+        findings.duration is not None
+        and findings.severity is not None
+        and findings.frequency is not None
+        and len(findings.triggers) > 0
+    )

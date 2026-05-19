@@ -5,19 +5,19 @@ import os
 # OpenRouter chains — ordered primary → backup 1 → backup 2 (spec §2.2)
 _OPENROUTER_CHAINS: dict[str, list[str]] = {
     "fast_trio": [
-        "anthropic/claude-haiku-4-5",
-        "anthropic/claude-haiku-3-5",
-        "google/gemini-flash-2.0",
+        "anthropic/claude-haiku-4-5-20251001",
+        "anthropic/claude-3-5-haiku",
+        "google/gemini-2.0-flash",
     ],
     "deep_dive": [
-        "google/gemini-flash-2.0",
+        "google/gemini-2.0-flash",
         "google/gemini-flash-1.5",
-        "anthropic/claude-haiku-4-5",
+        "anthropic/claude-haiku-4-5-20251001",
     ],
     "assembler": [
-        "anthropic/claude-sonnet-4",
-        "google/gemini-pro-2.0",
-        "google/gemini-flash-2.0",
+        "anthropic/claude-sonnet-4-5",
+        "google/gemini-2.0-flash",
+        "anthropic/claude-3-5-sonnet",
     ],
 }
 

@@ -54,6 +54,7 @@ Respond ONLY with a valid JSON object — no markdown fences, no text outside th
   "potentially_relevant_specialties": [
     "Medical specialty name only, e.g. 'Neurology', 'Cardiology'"
   ],
+  "suspected_cause": "One sentence. Hedged plain-English assessment of what may be causing the symptoms. Must start with 'Based on findings, this may be consistent with...' or similar. Do NOT diagnose. Do NOT use definitive language.",
   "recommended_next_step": "One sentence. MUST recommend consulting a licensed medical professional. Never suggest the user does not need to see a doctor."
 }
 
@@ -90,6 +91,7 @@ class QuadrantData(BaseModel):
 
 class DoctorPrepCard(BaseModel):
     summary: str
+    suspected_cause: str | None = None
     symptom_timeline: SymptomTimeline
     key_findings: list[str]
     lifestyle_context: str | None = None
@@ -117,6 +119,7 @@ class AssemblerOutput(BaseModel):
 
 class _LLMCardDraft(BaseModel):
     summary: str
+    suspected_cause: str | None = None
     symptom_timeline: SymptomTimeline
     key_findings: list[str]
     lifestyle_context: str | None = None
@@ -233,6 +236,7 @@ class AssemblerAgent:
 
         card = DoctorPrepCard(
             summary=draft.summary,
+            suspected_cause=draft.suspected_cause,
             symptom_timeline=draft.symptom_timeline,
             key_findings=draft.key_findings,
             lifestyle_context=draft.lifestyle_context,

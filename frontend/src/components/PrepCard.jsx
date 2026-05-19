@@ -73,6 +73,18 @@ export default function PrepCard() {
               )}
             </Section>
 
+            {/* ── Suspected Cause ── */}
+            {card.suspected_cause && (
+              <>
+                <Divider />
+                <Section label="Our Assessment">
+                  <div className="rounded-xl border border-quadrant-q2 bg-warm-elevated px-5 py-4">
+                    <p className="font-sans text-sm text-warm-off-white leading-relaxed">{card.suspected_cause}</p>
+                  </div>
+                </Section>
+              </>
+            )}
+
             <Divider />
 
             {/* ── Key Findings ── */}
@@ -136,9 +148,17 @@ export default function PrepCard() {
 
             {/* ── Recommended Next Step ── */}
             <Section label="Recommended Next Step">
-              <p className="font-sans text-sm text-warm-off-white leading-relaxed font-medium">
-                {card.recommended_next_step}
-              </p>
+              <div className="rounded-xl bg-accent/10 border border-accent/30 px-5 py-4 flex gap-4 items-start">
+                <span className="text-accent text-lg mt-0.5">🩺</span>
+                <div>
+                  <p className="font-sans text-sm text-warm-off-white leading-relaxed font-medium">
+                    {card.recommended_next_step}
+                  </p>
+                  <p className="font-sans text-xs text-warm-muted mt-2 leading-relaxed">
+                    This card is designed to help you have a more informed conversation with your doctor — not to replace that visit.
+                  </p>
+                </div>
+              </div>
             </Section>
 
             {/* ── Disclaimer ── */}

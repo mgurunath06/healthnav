@@ -1,3 +1,5 @@
+import os
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,9 +10,14 @@ from agents.supervisor import Supervisor
 
 app = FastAPI(title="HealthNav API", version="1.2")
 
+_origins = ["http://localhost:5173"]
+_frontend_url = os.environ.get("FRONTEND_URL", "").strip()
+if _frontend_url:
+    _origins.append(_frontend_url)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

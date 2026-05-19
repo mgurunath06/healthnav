@@ -485,7 +485,7 @@ def _dedup_questions(questions: list, history: list) -> list:
     for q in questions:
         q_words = set(q.question.lower().split())
         is_dup = any(
-            len(q_words & set(asked.split())) / max(len(q_words), 1) > 0.6
+            len(q_words & set(asked.split())) / max(len(q_words), 1) > 0.4
             for asked in asked_texts
         )
         if not is_dup:
@@ -526,7 +526,7 @@ def _filter_saturated_topics(questions: list, history: list) -> list:
     result = []
     for q in questions:
         q_topics = _question_topics(q.question)
-        saturated = q_topics and all(topic_counts.get(t, 0) >= 2 for t in q_topics)
+        saturated = q_topics and all(topic_counts.get(t, 0) >= 1 for t in q_topics)
         if not saturated:
             result.append(q)
     return result

@@ -62,10 +62,11 @@ class Supervisor:
             )
 
         # ── Phase 3: Deep-Dive ────────────────────────────────────────────────
+        _MAX_FOLLOWUP = 5
         deep_dive = await self._run_deep_dive(
             request_id, symptom_description, triage, follow_up_history, trace
         )
-        if deep_dive is not None and deep_dive.needs_followup:
+        if deep_dive is not None and deep_dive.needs_followup and len(follow_up_history) < _MAX_FOLLOWUP:
             deduped = _dedup_questions(deep_dive.followup_questions, follow_up_history)
             if deduped:
                 return self._needs_followup(request_id, deduped, trace, deep_dive.topic_overview)
@@ -77,7 +78,7 @@ class Supervisor:
                 request_id, symptom_description, deep_dive, trace
             )
             # Lifestyle may also request follow-up (spec §7.1 path 8)
-            if lifestyle is not None and lifestyle.needs_followup:
+            if lifestyle is not None and lifestyle.needs_followup and len(follow_up_history) < _MAX_FOLLOWUP:
                 return self._needs_followup(request_id, lifestyle.followup_questions, trace)
 
         # ── Phase 5: Assembler ────────────────────────────────────────────────

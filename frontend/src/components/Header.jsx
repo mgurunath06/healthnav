@@ -4,7 +4,7 @@ import { useTimer } from '../hooks/useTimer'
 export default function Header({ showReset = false }) {
   const reset = useInvestigationStore((s) => s.reset)
   const screen = useInvestigationStore((s) => s.screen)
-  const { mm, ss, active } = useTimer()
+  const { clock, cycle, active } = useTimer()
 
   const canReset = screen !== 'input'
   const showTimer = active && screen !== 'input'
@@ -21,15 +21,30 @@ export default function Header({ showReset = false }) {
         </span>
       </div>
 
-      {/* Centre — timer */}
+      {/* Centre — dual timers */}
       {showTimer && (
-        <div className="flex items-center gap-2">
-          <span className="font-mono text-xs text-warm-muted tracking-widest uppercase mr-1">
-            Time
-          </span>
-          <DigitPair value={mm} />
-          <span className="font-mono text-warm-muted text-base leading-none select-none">:</span>
-          <DigitPair value={ss} />
+        <div className="flex items-center gap-5">
+          {/* Wall clock */}
+          <div className="flex flex-col items-center gap-1">
+            <div className="flex items-center gap-1">
+              <DigitPair value={clock.hh} />
+              <span className="font-mono text-warm-muted text-base leading-none select-none">:</span>
+              <DigitPair value={clock.mm} />
+            </div>
+            <span className="font-mono text-[10px] text-warm-muted tracking-widest uppercase">Now</span>
+          </div>
+
+          <span className="text-warm-border select-none">|</span>
+
+          {/* Cycle timer */}
+          <div className="flex flex-col items-center gap-1">
+            <div className="flex items-center gap-1">
+              <DigitPair value={cycle.mm} />
+              <span className="font-mono text-warm-muted text-base leading-none select-none">:</span>
+              <DigitPair value={cycle.ss} />
+            </div>
+            <span className="font-mono text-[10px] text-warm-muted tracking-widest uppercase">Session</span>
+          </div>
         </div>
       )}
 

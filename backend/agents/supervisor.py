@@ -62,7 +62,7 @@ class Supervisor:
             )
 
         # ── Phase 3: Deep-Dive ────────────────────────────────────────────────
-        _MAX_FOLLOWUP = 10  # absolute runaway ceiling only
+        _MAX_FOLLOWUP = 20  # absolute runaway ceiling only
         deep_dive = await self._run_deep_dive(
             request_id, symptom_description, triage, follow_up_history, trace
         )

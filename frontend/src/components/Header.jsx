@@ -11,15 +11,8 @@ export default function Header({ showReset = false }) {
 
   return (
     <header className="w-full border-b border-warm-border bg-warm-charcoal px-6 py-4 flex items-center justify-between shrink-0">
-      {/* Wordmark */}
-      <div className="flex items-baseline gap-2.5">
-        <span className="font-serif text-xl font-semibold text-warm-off-white tracking-tight">
-          HealthNav
-        </span>
-        <span className="font-mono text-xs text-warm-muted tracking-widest uppercase">
-          Symptom Investigation
-        </span>
-      </div>
+      {/* Logo */}
+      <img src="/logo.png" alt="HealthNav" className="h-9 w-auto object-contain" />
 
       {/* Centre — dual timers */}
       {showTimer && (

@@ -12,7 +12,7 @@ export default function Header({ showReset = false }) {
   return (
     <header className="w-full border-b border-warm-border bg-warm-charcoal px-6 py-4 flex items-center justify-between shrink-0">
       {/* Logo */}
-      <img src="/logo.png" alt="HealthNav" className="h-9 w-auto object-contain" />
+      <img src="/logo.png" alt="HealthNav" className="h-14 w-auto object-contain" />
 
       {/* Centre — dual timers */}
       {showTimer && (

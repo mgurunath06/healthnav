@@ -67,7 +67,7 @@ export default function QuestionWizard() {
       <div className="flex flex-1 overflow-hidden">
 
         {/* ── Left: History ── */}
-        <aside className="w-72 shrink-0 border-r border-warm-border flex flex-col overflow-y-auto">
+        <aside className="hidden md:flex w-72 shrink-0 border-r border-warm-border flex-col overflow-y-auto">
           <div className="px-5 pt-6 pb-4 border-b border-warm-border">
             <p className="font-mono text-xs text-warm-muted tracking-widest uppercase">Your answers</p>
           </div>
@@ -104,7 +104,7 @@ export default function QuestionWizard() {
         </aside>
 
         {/* ── Centre: Current question or loading state ── */}
-        <main className="flex-1 flex flex-col items-center justify-center px-10 py-10 overflow-y-auto">
+        <main className="flex-1 flex flex-col items-center justify-center px-5 py-8 md:px-10 md:py-10 overflow-y-auto">
           {isLoading ? (
             <CenterLoading />
           ) : question ? (
@@ -158,7 +158,7 @@ export default function QuestionWizard() {
         </main>
 
         {/* ── Right: Topic context ── */}
-        <aside className="w-80 shrink-0 border-l border-warm-border flex flex-col overflow-y-auto">
+        <aside className="hidden md:flex w-80 shrink-0 border-l border-warm-border flex-col overflow-y-auto">
           <div className="px-5 pt-6 pb-4 border-b border-warm-border">
             <p className="font-mono text-xs text-warm-muted tracking-widest uppercase">General context</p>
           </div>

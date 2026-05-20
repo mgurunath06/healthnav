@@ -5,19 +5,19 @@ import os
 # OpenRouter chains — ordered primary → backup 1 → backup 2 (spec §2.2)
 _OPENROUTER_CHAINS: dict[str, list[str]] = {
     "fast_trio": [
-        "anthropic/claude-3.5-haiku",
-        "anthropic/claude-3-haiku",
-        "google/gemini-2.0-flash",
+        "anthropic/claude-haiku-4-5-20251001",
+        "anthropic/claude-haiku-3-5",
+        "google/gemini-2.5-flash-preview",
     ],
     "deep_dive": [
-        "google/gemini-2.0-flash",
-        "anthropic/claude-3.5-haiku",
-        "anthropic/claude-3-haiku",
+        "google/gemini-2.5-flash-preview",
+        "google/gemini-2.5-pro-preview",
+        "anthropic/claude-haiku-4-5-20251001",
     ],
     "assembler": [
-        "anthropic/claude-3.5-sonnet",
-        "anthropic/claude-3.5-haiku",
-        "google/gemini-2.0-flash",
+        "anthropic/claude-sonnet-4-5",
+        "google/gemini-2.5-pro-preview",
+        "google/gemini-2.5-flash-preview",
     ],
 }
 
@@ -30,7 +30,7 @@ _OLLAMA_CHAINS: dict[str, list[str]] = {
 }
 
 # Env vars that override the OpenRouter chain for each role (comma-separated model IDs).
-# Example: HEALTHNAV_FAST_TRIO_MODELS=anthropic/claude-haiku-4-5,anthropic/claude-haiku-3-5
+# Example: HEALTHNAV_FAST_TRIO_MODELS=anthropic/claude-haiku-4-5-20251001,anthropic/claude-haiku-3-5
 _OPENROUTER_ENV_VARS: dict[str, str] = {
     "fast_trio": "HEALTHNAV_FAST_TRIO_MODELS",
     "deep_dive": "HEALTHNAV_DEEP_DIVE_MODELS",

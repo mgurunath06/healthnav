@@ -13,7 +13,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd backend && .\\venv\\Scripts\\activate && python -m pytest tests/ -q --tb=short 2>&1 | tail -20",
+            "command": "cd H:/Guru/Learning/healthnav/backend && [ -d tests ] && ../.venv/Scripts/python -m pytest tests/ -q --tb=short 2>&1 | tail -20 || true",
             "description": "Auto-run tests after any agent file is written or edited"
           }
         ]

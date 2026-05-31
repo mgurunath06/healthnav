@@ -36,8 +36,12 @@ class Supervisor:
         self._log(request_id, "request_received", metadata={"symptom_hash": _sha256_prefix(symptom_description)})
 
         # ── Phase 1: Parallel agents ──────────────────────────────────────────
+        # Red flag runs ONLY on the initial description (round 0).
+        # Subsequent rounds answer structured questions — no new emergency
+        # symptoms can emerge from "yes/no" or scale answers, and the initial
+        # description has already been screened.
         guardrail, triage, red_flag, phase1_trace = await self._run_parallel(
-            request_id, symptom_description
+            request_id, symptom_description, follow_up_history
         )
         trace.extend(phase1_trace)
 
@@ -106,7 +110,21 @@ class Supervisor:
         self,
         request_id: str,
         symptom_description: str,
+        follow_up_history: list[dict],
     ) -> tuple[GuardrailOutput | None, TriageOutput | None, RedFlagOutput | None, list[dict]]:
+        round_number = len(follow_up_history)
+
+        # Red flag: initial round only.
+        # Follow-up answers are selections from our own predefined options — they
+        # cannot introduce new emergency symptoms. Initial description already screened.
+        should_run_red_flag = (round_number == 0)
+
+        # Guardrail: skip when the user was selecting (not typing).
+        # yes_no / scale / single_choice / multi_choice are all button/slider interactions —
+        # injection is impossible. Only run guardrail when the user could have typed
+        # free text (round 0, or a follow-up where question_type is absent/unknown).
+        should_run_guardrail = not _last_answer_was_selection(follow_up_history)
+
         guardrail_result: GuardrailOutput | None = None
         triage_result: TriageOutput | None = None
         red_flag_result: RedFlagOutput | None = None
@@ -207,7 +225,27 @@ class Supervisor:
                     "decision": "failed — defaulting to is_emergency=false",
                 }
 
-        await asyncio.gather(run_guardrail(), run_triage(), run_red_flag())
+        coros = [run_triage()]
+
+        if should_run_guardrail:
+            coros.append(run_guardrail())
+        else:
+            guardrail_entry = {
+                "agent": "guardrail",
+                "status": "skipped",
+                "decision": f"skipped — round {round_number} answer was a selection (injection impossible)",
+            }
+
+        if should_run_red_flag:
+            coros.append(run_red_flag())
+        else:
+            red_flag_entry = {
+                "agent": "red_flag_detector",
+                "status": "skipped",
+                "decision": f"skipped — follow-up round {round_number} (structured answers cannot introduce new red flags)",
+            }
+
+        await asyncio.gather(*coros)
 
         # Merge in spec-defined order (guardrail, triage, red_flag)
         ordered_trace = [e for e in [guardrail_entry, triage_entry, red_flag_entry] if e is not None]
@@ -530,6 +568,15 @@ def _filter_saturated_topics(questions: list, history: list) -> list:
         if not saturated:
             result.append(q)
     return result
+
+
+_SELECTION_TYPES = frozenset({"yes_no", "scale", "single_choice", "multi_choice"})
+
+def _last_answer_was_selection(follow_up_history: list[dict]) -> bool:
+    """True when the most recent follow-up answer came from a selection UI (not typed)."""
+    if not follow_up_history:
+        return False
+    return follow_up_history[-1].get("question_type") in _SELECTION_TYPES
 
 
 def _findings_sufficient(findings) -> bool:

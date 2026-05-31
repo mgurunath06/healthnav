@@ -3,16 +3,16 @@
 @theme {
   /* Warm Slate — Background / Surface */
   --color-warm-charcoal: #1A1814;
-  --color-warm-surface: #242018;
+  --color-warm-surface:  #242018;
   --color-warm-elevated: #2E2A24;
-  --color-warm-border: #3D3830;
+  --color-warm-border:   #3D3830;
 
   /* Warm Slate — Text */
   --color-warm-off-white: #F0EBE3;
-  --color-warm-muted: #9A9080;
+  --color-warm-muted:     #9A9080;
 
   /* Accent */
-  --color-accent: #C4622D;
+  --color-accent:       #C4622D;
   --color-accent-hover: #A8501F;
 
   /* Triage Quadrants */
@@ -23,54 +23,65 @@
 
   /* Typography */
   --font-serif: 'Fraunces', 'Playfair Display', Georgia, serif;
-  --font-sans: 'Inter', 'DM Sans', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+  --font-sans:  'Inter', 'DM Sans', system-ui, sans-serif;
+  --font-mono:  'JetBrains Mono', 'Courier New', monospace;
 
-  /* Shadows */
+  /* Shadows — warm umber, never blue-black */
   --shadow-matte: 0 4px 20px -2px rgba(26, 24, 20, 0.4);
 
   /* Motion */
   --ease-editorial: cubic-bezier(0.4, 0.0, 0.2, 1);
 }
 
-/* Animations */
+/* ── Keyframes ───────────────────────────────────────────────────────────── */
+
 @keyframes fade-in-up {
   from { opacity: 0; transform: translateY(24px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
 @keyframes float {
   0%, 100% { transform: translateY(0px); }
   50%       { transform: translateY(-7px); }
-}
-@keyframes pulse-ring {
-  0%   { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(196, 98, 45, 0.35); }
-  70%  { transform: scale(1);    box-shadow: 0 0 0 12px rgba(196, 98, 45, 0); }
-  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(196, 98, 45, 0); }
 }
 
 @keyframes digit-flip {
   from { opacity: 0; transform: translateY(-6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.animate-digit { animation: digit-flip 0.2s ease-out both; }
 
-.animate-fade-in-up   { animation: fade-in-up 0.6s var(--ease-editorial) both; }
-.animate-fade-in-up-2 { animation: fade-in-up 0.6s 0.15s var(--ease-editorial) both; }
-.animate-fade-in-up-3 { animation: fade-in-up 0.6s 0.30s var(--ease-editorial) both; }
-.animate-float        { animation: float 3.5s ease-in-out infinite; }
-.animate-pulse-ring   { animation: pulse-ring 2.5s ease-out infinite; }
-
-/* Print */
-@media print {
-  body { background: #fff !important; color: #000 !important; }
-  header, footer, .no-print { display: none !important; }
-  .print-card { box-shadow: none !important; border: 1px solid #ccc !important; }
+/* Loading screen — agent trace line pulse (opacity only, no scale, no glow) */
+@keyframes agent-trace-pulse {
+  0%, 100% { opacity: 0.6; }
+  50%       { opacity: 0.85; }
 }
 
-/* Base */
-*, *::before, *::after {
-  box-sizing: border-box;
+/* Loading screen — serif heading slow pulse */
+@keyframes slow-pulse {
+  0%, 100% { opacity: 0.7; }
+  50%       { opacity: 1; }
 }
+
+/* Skeleton breath (health values / document result placeholders) */
+@keyframes skeleton-breathe {
+  0%, 100% { opacity: 0.45; }
+  50%       { opacity: 0.75; }
+}
+
+/* ── Utility classes ─────────────────────────────────────────────────────── */
+
+.animate-digit            { animation: digit-flip          0.2s  ease-out              both; }
+.animate-fade-in-up       { animation: fade-in-up          0.6s  var(--ease-editorial) both; }
+.animate-fade-in-up-2     { animation: fade-in-up          0.6s  0.15s var(--ease-editorial) both; }
+.animate-fade-in-up-3     { animation: fade-in-up          0.6s  0.30s var(--ease-editorial) both; }
+.animate-float            { animation: float               3.5s  ease-in-out infinite; }
+.animate-agent-trace-pulse{ animation: agent-trace-pulse   3s    ease-in-out infinite; }
+.animate-slow-pulse       { animation: slow-pulse          3s    ease-in-out infinite; }
+.animate-skeleton-breathe { animation: skeleton-breathe   2.4s  ease-in-out infinite; }
+
+/* ── Base ────────────────────────────────────────────────────────────────── */
+
+*, *::before, *::after { box-sizing: border-box; }
 
 html {
   font-size: 16px;
@@ -91,4 +102,12 @@ body {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
+}
+
+/* ── Print ───────────────────────────────────────────────────────────────── */
+
+@media print {
+  body { background: #fff !important; color: #000 !important; }
+  header, footer, .no-print { display: none !important; }
+  .print-card { box-shadow: none !important; border: 1px solid #ccc !important; }
 }

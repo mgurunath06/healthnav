@@ -1,3 +1,6 @@
+import { useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { SignedIn, SignedOut, UserButton, useUser } from '@clerk/clerk-react'
 import { useInvestigationStore } from '../store/useInvestigationStore'
 import { useTimer } from '../hooks/useTimer'
 
@@ -5,19 +8,41 @@ export default function Header({ showReset = false }) {
   const reset = useInvestigationStore((s) => s.reset)
   const screen = useInvestigationStore((s) => s.screen)
   const { clock, cycle, active } = useTimer()
+  const { user, isSignedIn } = useUser()
+  const navigate = useNavigate()
+  const [logoError, setLogoError] = useState(false)
 
   const canReset = screen !== 'input'
   const showTimer = active && screen !== 'input'
 
   return (
     <header className="w-full border-b border-warm-border bg-warm-charcoal px-6 py-4 flex items-center justify-between shrink-0">
+
       {/* Logo */}
-      <img src="/logo.png" alt="HealthNav" className="h-14 w-auto object-contain" />
+      <button
+        onClick={() => navigate(isSignedIn ? '/dashboard' : '/')}
+        className="cursor-pointer flex items-center shrink-0"
+        aria-label="HealthNav home"
+      >
+        {!logoError ? (
+          <span className="inline-flex items-center justify-center bg-[#F0EBE3] rounded-lg p-1">
+            <img
+              src="/logo.jpg"
+              alt="HealthNav"
+              className="h-8 w-auto object-contain"
+              onError={() => setLogoError(true)}
+            />
+          </span>
+        ) : (
+          <span className="font-serif text-xl font-light text-accent select-none">
+            HealthNav
+          </span>
+        )}
+      </button>
 
       {/* Centre — dual timers */}
       {showTimer && (
         <div className="flex items-center gap-5">
-          {/* Wall clock */}
           <div className="flex flex-col items-center gap-1">
             <div className="flex items-center gap-1">
               <DigitPair value={clock.hh} />
@@ -29,7 +54,6 @@ export default function Header({ showReset = false }) {
 
           <span className="text-warm-border select-none">|</span>
 
-          {/* Cycle timer */}
           <div className="flex flex-col items-center gap-1">
             <div className="flex items-center gap-1">
               <DigitPair value={cycle.mm} />
@@ -42,10 +66,7 @@ export default function Header({ showReset = false }) {
       )}
 
       {/* Nav */}
-      <nav className="flex items-center gap-6">
-        <span className="font-sans text-xs text-warm-muted hidden sm:block">
-          Free · Anonymous · Not a diagnosis
-        </span>
+      <nav className="flex items-center gap-3">
         {(canReset || showReset) && (
           <button
             onClick={reset}
@@ -54,7 +75,24 @@ export default function Header({ showReset = false }) {
             New Investigation
           </button>
         )}
+        <SignedOut>
+          <Link
+            to="/login"
+            className="font-sans text-sm text-warm-muted hover:text-warm-off-white transition-colors duration-250 border border-warm-border rounded-md px-3 py-1.5"
+          >
+            Sign in
+          </Link>
+        </SignedOut>
+        <SignedIn>
+          {user?.firstName && (
+            <span className="font-sans text-sm text-warm-muted hidden sm:block">
+              {user.firstName}
+            </span>
+          )}
+          <UserButton afterSignOutUrl="/" />
+        </SignedIn>
       </nav>
+
     </header>
   )
 }

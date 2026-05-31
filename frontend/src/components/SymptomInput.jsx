@@ -37,6 +37,13 @@ export default function SymptomInput() {
     investigate(text.trim())
   }
 
+  function handleKeyDown(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      if (canSubmit) investigate(text.trim())
+    }
+  }
+
   return (
     <div className="min-h-dvh bg-warm-charcoal flex flex-col">
       <Header />
@@ -46,7 +53,7 @@ export default function SymptomInput() {
 
           {/* Animated icon */}
           <div className="flex justify-center mb-8 animate-float">
-            <div className="animate-pulse-ring w-20 h-20 rounded-2xl bg-accent/10 border border-accent/25 flex items-center justify-center shadow-matte">
+            <div className="w-20 h-20 rounded-2xl bg-accent/10 border border-accent/25 flex items-center justify-center">
               <span className="text-4xl select-none">🩺</span>
             </div>
           </div>
@@ -88,18 +95,18 @@ export default function SymptomInput() {
                 <textarea
                   value={text}
                   onChange={(e) => setText(e.target.value.slice(0, MAX_CHARS))}
+                  onKeyDown={handleKeyDown}
                   placeholder="e.g. I've had a throbbing headache behind my right eye for the past 4 days. It gets worse in the morning and when I look at screens. I've also felt slightly nauseous..."
                   rows={6}
                   className="
-                    w-full resize-none rounded-xl
+                    w-full resize-none rounded
                     bg-warm-surface border border-warm-border
                     text-warm-off-white placeholder-warm-muted
                     font-sans text-base leading-relaxed
                     px-5 py-4
-                    outline-none
+                    outline-none ring-0 focus:ring-0
                     transition-colors duration-300
                     focus:border-accent
-                    shadow-matte
                   "
                 />
                 <span className="absolute bottom-3 right-4 font-mono text-xs text-warm-muted select-none">

@@ -1,10 +1,13 @@
-# HealthNav — Technical Spec (v2.0)
+# HealthNav — Technical Spec (v2.3)
 
 > **Status:** Contracts locked. Implementation details added per sprint.
 > **Scope:** v1 MVP complete. v2 Premium tier — auth, user data, saved cards, payment architecture.
 > **Source of truth:** This document. Code must conform. If reality forces a change, update this doc *first*, then code.
 
 ### Changelog
+- **v2.3** — §24 (requested as §22): Health Companion Chat added (Sprint 8 scope). Premium only. Gemini Flash 2.0 (`companion` role). Grounded in user health data. Clinical boundary guardrails mandatory. §22 was already occupied by v2 Implementation Notes — new section placed as §24.
+- **v2.2** — §19.4: enriched extraction schema — `document_meta`, `findings`, `conclusions`, `reporting_doctor`, `hospital_or_lab`, `patient_name` added to extraction output. `document_findings` table added. `document_upload_logs` extended with reporting/referring doctor, hospital, patient name, and document subtype columns. `extracted_health_values` gains `profile_id` FK. §23: Family Profiles added (Sprint 8 scope) — `profiles` table, profile CRUD API, document upload with profile selection, name-match UX, migration 003.
+- **v2.1** — §2.2/§2.5: `doc_extraction` role added (OpenRouter: `google/gemini-flash-2.0` → `google/gemini-pro-2.0`; local: `llama3.1:8b`). §19.4: image path updated — raw bytes sent to Gemini as native vision message, no pytesseract dependency. `recorded_date` behaviour clarified: set from `document_date` in extraction result; `null` if document carries no date (never defaults to upload date).
 - **v2.0** — Premium tier extension. Auth: Clerk + Google OAuth. DB: Railway Postgres. New sections: §15 Auth Flow, §16 User Data Model, §17 Saved Prep Cards Schema, §18 Premium Route Gating, §19 Payment Architecture (deferred). API contract extended with `/auth/*` routes and `POST /cards`. Audit log schema updated for `tier: premium`. Tier model §3.2 updated from future-scope to active sprint.
 - **v1.4** — Frontend contract rewritten to match `spec/UIDeisgn.md` (Sprint 3). Stack upgraded: Tailwind CSS replaces plain CSS, Zustand replaces bare React state, Burnt Sienna replaces teal accent. Full color token system, typography, motion rules, and component map added. Loading and Error screen specs added (missing from UI spec). "Save as PDF" retained as a disabled stub CTA (PDF generation remains v2).
 - **v1.3** — Model strategy updated: Ollama local models used during development. OpenRouter used in production (Railway deploy). Model mappings updated accordingly.
@@ -86,6 +89,7 @@ Agents reference a **role** (`fast_trio`, `deep_dive`, `assembler`), never a mod
 | `fast_trio` | Guardrail, Triage, Red Flag | `anthropic/claude-haiku-4-5` | `anthropic/claude-haiku-3-5` | `google/gemini-flash-2.0` |
 | `deep_dive` | Deep-Dive, Lifestyle | `google/gemini-flash-2.0` | `google/gemini-flash-1.5` | `anthropic/claude-haiku-4-5` |
 | `assembler` | Assembler | `anthropic/claude-sonnet-4` | `google/gemini-pro-2.0` | `google/gemini-flash-2.0` |
+| `doc_extraction` | Document extraction | `google/gemini-flash-2.0` | `google/gemini-pro-2.0` | — |
 | *(supervisor)* | Supervisor | — (pure Python, no LLM) | — | — |
 
 **Ollama chains (local dev) — ordered best → worst:**
@@ -95,6 +99,7 @@ Agents reference a **role** (`fast_trio`, `deep_dive`, `assembler`), never a mod
 | `fast_trio` | `gemma4:latest` | `qwen3:14b` | `llama3.1:8b` |
 | `deep_dive` | `gemma4:latest` | `qwen3:14b` | `llama3.1:8b` |
 | `assembler` | `gemma4:latest` | `qwen3:14b` | `llama3.1:8b` |
+| `doc_extraction` | `llama3.1:8b` | — | — |
 
 ### 2.3 Ollama configuration
 - Base URL: `http://localhost:11434` (default)
@@ -116,6 +121,7 @@ Chain definitions live in `backend/agents/model_config.py`. OpenRouter chains ar
 | `HEALTHNAV_FAST_TRIO_MODELS` | `fast_trio` |
 | `HEALTHNAV_DEEP_DIVE_MODELS` | `deep_dive` |
 | `HEALTHNAV_ASSEMBLER_MODELS` | `assembler` |
+| `HEALTHNAV_DOC_EXTRACTION_MODELS` | `doc_extraction` |
 
 **Fallback trigger rules:**
 - Try next model on: `5xx` server error, timeout (after its 1 internal retry), rate limit (after its 2 internal retries).
@@ -1387,69 +1393,162 @@ past_context = pgvector_query(
 
 ### 19.4 Document upload pipeline
 
-> **Core principle:** Files are processed and immediately discarded. Only extracted values are stored. Users are clearly informed of this at every touchpoint.
+> **Core principle:** Files are processed and immediately discarded. Only extracted data is stored. Users are clearly informed of this at every touchpoint.
 
-**Supported formats:** PDF, JPG, PNG (blood test reports, prescriptions, MRI/X-ray reports, lab results)
+**Supported formats:** PDF, JPG, PNG — blood test reports, echo/cardiac reports, imaging studies, prescriptions, pathology reports, clinical letters.
 
 **`POST /documents/upload`** (Premium only, multipart/form-data)
 ```
-Request: file (binary), document_type ("blood_test" | "prescription" | "imaging_report" | "other")
-Max file size: 10MB
+Request fields:
+  file            binary         required
+  document_type   string         required — "blood_test" | "prescription" | "imaging_report" | "other"
+  profile_id      UUID           optional — defaults to the user's "self" profile (see §23)
+Max file size: 10 MB
 ```
 
 **Processing pipeline:**
 ```
 [File received in memory — never written to disk]
-  → If PDF: extract text via pdfplumber
-  → If image: OCR via pytesseract or Google Vision API
-  → LLM extraction call (claude-haiku-4-5):
-      Prompt: "Extract all medical values, test names, dates, and conditions from this text.
-               Return strict JSON only. Schema: { values: [{name, value, unit, date, reference_range}],
-               conditions_mentioned: [], document_date: ISO8601 or null }"
+  → If PDF:      extract text via pdfplumber; pass as plain text to LLM
+  → If image:    send raw bytes to Gemini as a native vision message
+                 (no OCR library — pytesseract is NOT a dependency)
+  → LLM extraction call (role: doc_extraction → google/gemini-2.5-flash-preview)
   → Validate extraction with Pydantic
-  → Write to extracted_health_values + document_upload_logs
+  → Write to document_upload_logs + extracted_health_values + document_findings
   → File buffer discarded — never persisted
 ```
+
+**LLM extraction prompt:**
+```
+You are extracting structured medical data from a health document.
+Return ONLY valid JSON, no preamble, no markdown fences.
+
+Schema:
+{
+  "document_meta": {
+    "document_type": "blood_test | echo | imaging | prescription | pathology | other",
+    "document_date": "YYYY-MM-DD or null",
+    "hospital_or_lab": "string or null",
+    "reporting_doctor": "string or null",
+    "referring_doctor": "string or null",
+    "patient_name": "string or null",
+    "patient_age": "string or null",
+    "patient_sex": "string or null"
+  },
+  "numeric_values": [
+    {
+      "name": "e.g. LVEF, HbA1c, Haemoglobin",
+      "value": "numeric string",
+      "unit": "unit or null",
+      "reference_range": "e.g. 55-70% or null",
+      "is_abnormal": true/false/null
+    }
+  ],
+  "findings": [
+    {
+      "section": "section heading e.g. Sector Echocardiography",
+      "finding": "verbatim or paraphrased finding text",
+      "is_abnormal": true/false/null
+    }
+  ],
+  "conclusions": ["string — each conclusion bullet as a separate item"],
+  "conditions_mentioned": ["string"],
+  "processing_note": "any quality issues or null"
+}
+```
+
+**`recorded_date` behaviour:** Set from `document_meta.document_date` in the extraction result. If the document carries no date, `recorded_date` is stored as `NULL`. It is **never** defaulted to the upload timestamp — a missing date is always explicit null.
 
 **`document_upload_logs` table:**
 ```sql
 CREATE TABLE document_upload_logs (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  uploaded_at     TIMESTAMPTZ DEFAULT NOW(),
+  id                UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id           UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  profile_id        UUID        REFERENCES profiles(id) ON DELETE SET NULL,
+  uploaded_at       TIMESTAMPTZ DEFAULT NOW(),
   original_filename VARCHAR(255) NOT NULL,
-  document_type   VARCHAR(50) NOT NULL,
-  extraction_status VARCHAR(50) NOT NULL,   -- "success" | "partial" | "failed"
-  values_extracted  SMALLINT DEFAULT 0,
-  processing_note TEXT
+  document_type     VARCHAR(50) NOT NULL,
+  document_subtype  VARCHAR(50),                 -- echo | blood_test | imaging | prescription | pathology | other
+  extraction_status VARCHAR(50) NOT NULL,        -- "success" | "partial" | "failed"
+  values_extracted  SMALLINT    DEFAULT 0,
+  patient_name      VARCHAR(255),
+  reporting_doctor  VARCHAR(255),
+  referring_doctor  VARCHAR(255),
+  hospital_or_lab   VARCHAR(255),
+  processing_note   TEXT
 );
 ```
 
-**`extracted_health_values` table:**
+**`extracted_health_values` table** (numeric values only):
 ```sql
 CREATE TABLE extracted_health_values (
-  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id          UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  upload_log_id    UUID REFERENCES document_upload_logs(id),
-  value_name       VARCHAR(255) NOT NULL,
-  value_raw        VARCHAR(100) NOT NULL,
-  unit             VARCHAR(50),
-  reference_range  VARCHAR(100),
-  is_abnormal      BOOLEAN,
-  recorded_date    DATE,
-  created_at       TIMESTAMPTZ DEFAULT NOW()
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  upload_log_id   UUID        REFERENCES document_upload_logs(id),
+  profile_id      UUID        REFERENCES profiles(id) ON DELETE SET NULL,
+  value_name      VARCHAR(255) NOT NULL,
+  value_raw       VARCHAR(100) NOT NULL,
+  unit            VARCHAR(50),
+  reference_range VARCHAR(100),
+  is_abnormal     BOOLEAN,
+  recorded_date   DATE,
+  created_at      TIMESTAMPTZ DEFAULT NOW()
 );
+```
+
+**`document_findings` table** (narrative findings from echo, imaging, pathology, clinical letters):
+```sql
+CREATE TABLE document_findings (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  upload_log_id UUID        REFERENCES document_upload_logs(id),
+  profile_id    UUID        REFERENCES profiles(id) ON DELETE SET NULL,
+  section       VARCHAR(255),
+  finding       TEXT        NOT NULL,
+  is_abnormal   BOOLEAN,
+  recorded_date DATE,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+**`POST /documents/upload` response:**
+```json
+{
+  "upload_id": "uuid",
+  "status": "success | partial | failed",
+  "name_match": true,
+  "document_meta": {
+    "document_type": "echo",
+    "document_date": "2025-03-15",
+    "hospital_or_lab": "Apollo Hospital",
+    "reporting_doctor": "Dr. S. Mehta",
+    "referring_doctor": "Dr. R. Iyer",
+    "patient_name": "Gurunath M",
+    "patient_age": "42",
+    "patient_sex": "M"
+  },
+  "numeric_values": [
+    { "name": "LVEF", "value": "62", "unit": "%", "reference_range": "55-70%", "is_abnormal": false }
+  ],
+  "findings": [
+    { "section": "Left Ventricle", "finding": "Normal size and systolic function.", "is_abnormal": false }
+  ],
+  "conclusions": ["Normal study.", "No wall motion abnormality detected."],
+  "conditions_mentioned": ["hypertension"],
+  "processing_note": null
+}
 ```
 
 **User-facing disclosure (shown at every upload touchpoint):**
 > "Your file is processed immediately and never stored. We extract health values to personalise your experience, then permanently delete the file. You'll see a log of what you uploaded and what was found, but the original file cannot be retrieved."
 
 **UI confirmation flow:**
-1. User selects file → modal appears with disclosure text + "I understand" checkbox
-2. "I understand" checked → "Upload & Process" button enables
-3. Processing spinner: "Extracting health values..."
-4. Success state: "Found [N] values from [filename]. File has been discarded."
-5. Upload log entry appears in `<ProfileScreen />` under "Uploaded Documents"
+1. User selects profile → selects file → disclosure modal appears
+2. Disclosure acknowledged → file picker opens
+3. Processing spinner: "Extracting health values…"
+4. Success: "Found [N] values from [filename]. File has been discarded."
+5. If `name_match = false`: name-mismatch warning shown (see §23.5)
+6. Upload log entry appears in `<ProfileScreen />` under "Uploaded Documents"
 
 ### 19.5 Reminder engine
 
@@ -1632,3 +1731,377 @@ POST  /payments/cancel
 
 ### Sprint 8 — Polish + Payment Stub
 *Premium upsell touchpoints on free tier. Payment architecture tables created (empty). Smoke tests. Full acceptance criteria run-through. Beta launch.*
+
+---
+
+## 23. Family Profiles (Sprint 8)
+
+> One Premium account can hold multiple named profiles — the account holder plus family members. All uploaded documents, extracted health values, and saved prep cards are associated with a specific profile.
+
+### 23.1 Data model
+
+**`profiles` table:**
+```sql
+CREATE TABLE profiles (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  display_name  VARCHAR(100) NOT NULL,
+  relation      VARCHAR(20) NOT NULL CHECK (relation IN ('self','spouse','child','parent','sibling','other')),
+  date_of_birth DATE,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+**Rules:**
+- The `self` profile is auto-created when a user first signs up (via the auth webhook).
+- Every user must have exactly one profile with `relation = 'self'` at all times.
+- Maximum **10 profiles** per user (enforced at API level, not DB constraint).
+- `display_name` max 100 characters; `relation` must be one of the enum values.
+
+**Foreign key additions (ALTER TABLE — migration 003):**
+```sql
+ALTER TABLE document_upload_logs    ADD COLUMN profile_id UUID REFERENCES profiles(id) ON DELETE SET NULL;
+ALTER TABLE extracted_health_values ADD COLUMN profile_id UUID REFERENCES profiles(id) ON DELETE SET NULL;
+ALTER TABLE document_findings       ADD COLUMN profile_id UUID REFERENCES profiles(id) ON DELETE SET NULL;
+ALTER TABLE saved_prep_cards        ADD COLUMN profile_id UUID REFERENCES profiles(id) ON DELETE SET NULL;
+```
+
+**Backfill (run after ALTER TABLE):**
+```sql
+-- Set all existing rows to the account holder's self profile
+UPDATE document_upload_logs    l SET profile_id = (SELECT id FROM profiles WHERE user_id = l.user_id AND relation = 'self');
+UPDATE extracted_health_values v SET profile_id = (SELECT id FROM profiles WHERE user_id = v.user_id AND relation = 'self');
+UPDATE saved_prep_cards        c SET profile_id = (SELECT id FROM profiles WHERE user_id = c.user_id AND relation = 'self');
+```
+
+---
+
+### 23.2 Profile management API
+
+All endpoints: Premium only. A user can only access their own profiles.
+
+**Profile object:**
+```json
+{
+  "id": "uuid",
+  "display_name": "Mum",
+  "relation": "parent",
+  "date_of_birth": "1955-04-12",
+  "created_at": "2025-06-01T10:00:00Z"
+}
+```
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/profiles` | List all profiles for the current user |
+| `POST` | `/profiles` | Create a new profile |
+| `PATCH` | `/profiles/{id}` | Update `display_name`, `relation`, `date_of_birth` |
+| `DELETE` | `/profiles/{id}` | Delete a profile (cannot delete the `self` profile) |
+
+**`POST /profiles` request:**
+```json
+{ "display_name": "Mum", "relation": "parent", "date_of_birth": "1955-04-12" }
+```
+
+**Validation rules:**
+- `display_name`: required, 1–100 chars, trimmed.
+- `relation`: required, must be one of `self | spouse | child | parent | sibling | other`. Cannot create a second `self` profile.
+- `date_of_birth`: optional ISO 8601 date; must be in the past; cannot be more than 120 years ago.
+- Max profiles per user: 10. Return `429` with `{ "error": "PROFILE_LIMIT_REACHED" }` if exceeded.
+
+**`DELETE /profiles/{id}` rules:**
+- Returns `403` if `relation = 'self'`.
+- Returns `404` if the profile does not belong to the current user.
+- Does **not** cascade-delete health data — associated rows are orphaned (`profile_id = NULL`), not deleted.
+
+---
+
+### 23.3 Document upload with profile selection
+
+- `POST /documents/upload` accepts an optional `profile_id` field (UUID).
+- If `profile_id` is omitted or null → default to the current user's `self` profile.
+- If `profile_id` belongs to a different user → return `403`.
+- The response includes a `name_match` field:
+
+| `name_match` value | Meaning |
+|---|---|
+| `true` | `patient_name` extracted from the document matches the selected profile's `display_name` (case-insensitive substring) |
+| `false` | Names do not match |
+| `null` | `patient_name` could not be extracted from the document |
+
+---
+
+### 23.4 Frontend: profile selector
+
+**`<ProfileSelector />`** component:
+- Dropdown or card-picker showing `display_name` + relation badge for each profile.
+- Includes an "Add profile →" option that navigates to `<ManageProfilesScreen />`.
+- Default selection: always the `self` profile on first load.
+- Selected profile is held in component state (not global store) for the upload flow; held in global Zustand store for the dashboard context.
+
+**Where `<ProfileSelector />` appears:**
+- In the document upload flow — shown as the first step, before the file picker disclosure.
+- On the Premium Dashboard header row — sets the active profile context for all displayed data (health values, saved cards).
+
+**`<ManageProfilesScreen />`** (route: `/dashboard/profiles`):
+- Lists all profiles with `display_name`, `relation`, `date_of_birth`.
+- Add profile button → inline form (display_name, relation, DOB).
+- Edit button per row → inline edit.
+- Delete button per row → confirmation modal; disabled for `self` profile.
+
+---
+
+### 23.5 Name-match UX
+
+When `name_match = false` after a successful upload, show an inline warning banner **below** the result summary:
+
+> **"The name on this document ({patient_name}) doesn't match the selected profile ({profile.display_name}). Was this document uploaded for the right person?"**
+
+Two action buttons:
+- **Keep as {profile.display_name}** — dismiss warning, keep association as-is.
+- **Change profile** — opens `<ProfileSelector />` inline; on selection, calls `PATCH /documents/upload/{upload_id}/profile` with the new `profile_id`. (This endpoint is a Sprint 8 addition — stub acceptable in Sprint 7.)
+
+When `name_match = null` — no warning is shown. Missing patient name is treated as an inconclusive result, not an error.
+
+---
+
+### 23.6 Migration plan
+
+**`backend/db/migrations/003_profiles.sql`:**
+```sql
+-- Step 1: create profiles table
+CREATE TABLE profiles (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  display_name  VARCHAR(100) NOT NULL,
+  relation      VARCHAR(20) NOT NULL CHECK (relation IN ('self','spouse','child','parent','sibling','other')),
+  date_of_birth DATE,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Step 2: backfill self profile for every existing user
+INSERT INTO profiles (user_id, display_name, relation)
+SELECT id, full_name, 'self' FROM users
+ON CONFLICT DO NOTHING;
+
+-- Step 3: add profile_id FK to dependent tables
+ALTER TABLE document_upload_logs    ADD COLUMN profile_id UUID REFERENCES profiles(id) ON DELETE SET NULL;
+ALTER TABLE extracted_health_values ADD COLUMN profile_id UUID REFERENCES profiles(id) ON DELETE SET NULL;
+ALTER TABLE document_findings       ADD COLUMN profile_id UUID REFERENCES profiles(id) ON DELETE SET NULL;
+ALTER TABLE saved_prep_cards        ADD COLUMN profile_id UUID REFERENCES profiles(id) ON DELETE SET NULL;
+
+-- Step 4: backfill profile_id for existing rows
+UPDATE document_upload_logs    l SET profile_id = (SELECT id FROM profiles WHERE user_id = l.user_id AND relation = 'self');
+UPDATE extracted_health_values v SET profile_id = (SELECT id FROM profiles WHERE user_id = v.user_id AND relation = 'self');
+UPDATE saved_prep_cards        c SET profile_id = (SELECT id FROM profiles WHERE user_id = c.user_id AND relation = 'self');
+```
+
+---
+
+### 23.7 Constraints and rules
+
+- **Data ownership:** A user can only read or write profiles where `profiles.user_id = current_user_id`. Enforced at the API layer on every endpoint — never rely on the client to pass the correct `user_id`.
+- **Orphaned data:** Deleting a profile sets `profile_id = NULL` on all associated rows (ON DELETE SET NULL). Orphaned rows are shown under "Unknown profile" in the UI. The health data is never deleted.
+- **Profile names are display labels only.** They are not verified against any identity document or Clerk account data. They exist solely to help the user organise their records.
+- **Self profile is immutable in key ways:** `relation` cannot be changed from `self`; the profile cannot be deleted. `display_name` and `date_of_birth` can be updated.
+- **Auto-creation trigger:** The `self` profile is created by the Clerk `user.created` webhook handler on first sign-up. If the webhook fails, a fallback creation runs at first login (`GET /profiles` returns an empty list → backend creates the self profile on-the-fly).
+- **Profile selector state:** The last selected profile is stored in `localStorage` keyed by `user_id` so that the selection persists across page refreshes without a backend call.
+
+---
+
+## 24. Health Companion Chat (Sprint 8)
+
+> Premium only. A persistent chat interface grounded in the user's health data. Not a symptom investigation tool — a wellness companion that answers broader questions informed by uploaded documents, extracted health values, and past prep cards.
+
+---
+
+### 24.1 Overview
+
+**What it is:** A conversational interface for wellness guidance — diet, lifestyle, schedule, understanding test results in general terms, knowing when to follow up with a doctor.
+
+**What it is not:** A diagnostic tool, a treatment recommender, or a second opinion engine.
+
+**Core constraint (immutable — same policy weight as §19.6):**
+> The Health Companion Agent **NEVER** gives medical advice, diagnoses, or treatment recommendations. Every response that touches clinical data must include a disclaimer and defer to the user's doctor. The agent answers strictly in the frame of *"general wellness guidance informed by your data."*
+
+---
+
+### 24.2 Agent: Health Companion Agent
+
+**Model role:** `companion` (add to `model_config.py` — see §24.7)
+
+**Context injected at the start of every conversation:**
+```json
+{
+  "user_context": {
+    "profile": {
+      "display_name": "string",
+      "date_of_birth": "YYYY-MM-DD or null",
+      "relation": "self | spouse | child | parent | sibling | other"
+    },
+    "extracted_health_values": "last 90 days, all profiles — [{value_name, value_raw, unit, reference_range, is_abnormal, recorded_date}]",
+    "document_findings": "all findings grouped by upload — [{upload_id, document_type, recorded_date, findings: [{section, finding, is_abnormal}]}]",
+    "past_prep_cards": "last 5, summary only — [{symptom_description, quadrant, date}]",
+    "conditions_mentioned": "aggregated from all documents — [string]"
+  }
+}
+```
+
+**System prompt core rules:**
+- Ground every answer in the user's actual data when relevant
+- Permitted scope: diet, lifestyle, daily schedule, wellness habits, understanding test results in general terms, when to follow up with a doctor
+- Guardrail: if the question asks for diagnosis, prescription, or "am I okay" reassurance → decline using the template in §24.6
+- Every response that references clinical values must end with: *"This is general wellness information — not medical advice. Please discuss with your doctor."*
+- Never say "you are fine", "you don't need to worry", or any equivalent reassurance about clinical status
+
+---
+
+### 24.3 API Contract
+
+**`POST /chat`** (Premium only)
+
+Request:
+```json
+{
+  "message": "string, 1–2000 chars",
+  "conversation_id": "UUID or null  (null = start new conversation)",
+  "profile_id":      "UUID or null  (null = self profile)"
+}
+```
+
+Response:
+```json
+{
+  "conversation_id": "UUID",
+  "reply":           "string",
+  "disclaimer_shown": true,
+  "sources_used":    ["health_values", "document_findings", "prep_cards", "general_knowledge"]
+}
+```
+
+**`GET /chat/{conversation_id}`** — retrieve full conversation history
+
+Response:
+```json
+{
+  "conversation_id": "UUID",
+  "title": "string",
+  "profile_id": "UUID or null",
+  "messages": [
+    { "role": "user | assistant", "content": "string", "disclaimer_shown": false, "created_at": "ISO8601" }
+  ]
+}
+```
+
+**`GET /chat`** — list all conversations for the current user
+
+Response: `[{ "conversation_id", "title", "profile_id", "created_at", "updated_at" }]`
+
+**`DELETE /chat/{conversation_id}`** — delete conversation and all its messages
+
+---
+
+### 24.4 DB Schema
+
+**`chat_conversations` table:**
+```sql
+CREATE TABLE chat_conversations (
+  id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  profile_id UUID        REFERENCES profiles(id) ON DELETE SET NULL,
+  title      VARCHAR(255),          -- auto-generated from first user message (first 80 chars)
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+**`chat_messages` table:**
+```sql
+CREATE TABLE chat_messages (
+  id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  conversation_id  UUID        NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
+  role             VARCHAR(10) NOT NULL CHECK (role IN ('user', 'assistant')),
+  content          TEXT        NOT NULL,
+  disclaimer_shown BOOLEAN     DEFAULT false,
+  sources_used     JSONB,
+  created_at       TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+**Index:**
+```sql
+CREATE INDEX idx_chat_messages_conversation ON chat_messages(conversation_id, created_at);
+```
+
+---
+
+### 24.5 Frontend: Chat UI
+
+**Route:** `/chat` (gated — `PrivateRoute`)
+
+**Access point:** "Ask HealthNav" CTA on the Premium Dashboard.
+
+**UI rules (strict — must conform to `UIDeisgn.md`):**
+
+- **No chat bubble aesthetic.** This is not WhatsApp. Messages render as editorial text blocks.
+- **User messages:** right-aligned, `bg-warm-surface` background, `font-sans`, `text-warm-off-white`.
+- **Assistant messages:** left-aligned, `bg-warm-elevated` background, `font-serif` body text, `text-warm-off-white`.
+- **Disclaimer:** renders as muted italic footer text on relevant assistant messages — not a banner, not a toast.
+- **Input:** same textarea style as `<SymptomInput />` — `bg-warm-surface`, Burnt Sienna focus border, `Enter` to send, `Shift+Enter` for newline.
+- **Conversation list:** left sidebar on desktop (`w-64`); accessible via back-nav link on mobile. Shows conversation title + date.
+- **Profile selector:** shown at the top of the chat view — "Chatting about: [profile display_name]". Uses `<ProfileSelector />` component (§23.4).
+- **Loading state:** Agent Trace pattern (§6 of `UIDeisgn.md`) — a single pulsing line, no spinner.
+- **No streaming in v1** — full response displayed at once when ready.
+
+**Component map:**
+- `<ChatScreen />` — route wrapper, loads conversation list
+- `<ConversationView />` — message thread + input
+- `<MessageBlock role="user|assistant" />` — single message renderer
+- `<ChatInput />` — textarea + send button
+
+---
+
+### 24.6 Guardrail Rules
+
+Questions the agent **must decline** and redirect to the doctor:
+- "Do I have [condition]?"
+- "Should I take [medication]?"
+- "Am I okay?" / "Is this normal for me?"
+- "What is wrong with me?"
+- Any request for a treatment plan, dosage, or clinical reassurance
+
+**Decline response template:**
+> "That's a question best answered by your doctor who can evaluate you directly. Based on your records, here's what might be worth discussing with them: [relevant context from their data]."
+
+The agent should always offer *something useful* (relevant data context, questions to ask the doctor) — a bare refusal is not acceptable.
+
+---
+
+### 24.7 Model Config Addition
+
+Add to `backend/agents/model_config.py`:
+
+**OpenRouter chain:**
+```
+"companion": ["google/gemini-2.5-flash-preview", "google/gemini-2.5-pro-preview"]
+```
+
+**Ollama chain:**
+```
+"companion": ["llama3.1:8b"]
+```
+
+**Env var override:** `HEALTHNAV_COMPANION_MODELS`
+
+> Note: The spec requested `google/gemini-flash-2.0` and `google/gemini-pro-2.0` — these are replaced with the verified OpenRouter slugs `google/gemini-2.5-flash-preview` / `google/gemini-2.5-pro-preview` per the correction applied in §2.2 (model IDs were confirmed working; the `2.0` suffix format does not exist on OpenRouter).
+
+---
+
+### 24.8 Constraints and Rules
+
+- **Access control:** A user can only read/write conversations where `chat_conversations.user_id = current_user_id`. Enforced at API layer.
+- **Profile scoping:** Context is built from the selected profile's data. If `profile_id = null`, uses the self profile.
+- **Conversation history window:** Maximum last 20 messages sent to the LLM as context. Older messages are stored in DB but not re-injected.
+- **Title generation:** Conversation title is auto-set from the first user message (first 80 characters, truncated with ellipsis). Not editable in v1.
+- **No cross-user data:** The context injection must only include data owned by `current_user_id`. This is enforced at the query level, not assumed from the client.
+- **Deletion is permanent:** Deleting a conversation cascades to all messages. No soft-delete in v1.

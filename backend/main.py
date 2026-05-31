@@ -1,4 +1,5 @@
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -7,8 +8,17 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from agents.supervisor import Supervisor
+from db.client import close_pool
+from routers.documents import router as documents_router
 
-app = FastAPI(title="HealthNav API", version="1.2")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    await close_pool()
+
+
+app = FastAPI(title="HealthNav API", version="1.2", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -17,15 +27,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(documents_router, prefix="/documents")
+
 _supervisor = Supervisor()
 
 
 # ── Request model ─────────────────────────────────────────────────────────────
 
 class FollowUpHistoryItem(BaseModel):
-    question_id: str
+    question_id:   str
     question_text: str
-    answer: str
+    question_type: str | None = None   # 'yes_no' | 'single_choice' | 'multi_choice' | 'scale'
+    answer:        str
 
 
 class InvestigateRequest(BaseModel):

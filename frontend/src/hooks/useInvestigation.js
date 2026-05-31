@@ -55,8 +55,9 @@ export function useInvestigation() {
   // Appends to history and immediately fires the next round.
   function submitAnswer(question, answer) {
     const item = {
-      question_id: question.id,
+      question_id:   question.id,
       question_text: question.question,
+      question_type: question.type,   // 'yes_no' | 'single_choice' | 'multi_choice' | 'scale'
       answer: Array.isArray(answer) ? answer.join(', ') : String(answer),
     }
     store.appendFollowUp(item)

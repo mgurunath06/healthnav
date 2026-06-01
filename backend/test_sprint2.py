@@ -4,7 +4,7 @@
 import sys
 import httpx
 
-BASE = "http://localhost:8000"
+BASE = "https://backend-production-guru.up.railway.app"
 _client = httpx.Client(timeout=180.0)
 _pass = 0
 _fail = 0

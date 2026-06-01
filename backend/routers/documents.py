@@ -73,6 +73,15 @@ async def upload_document(
             async with conn.transaction():
                 await conn.execute(
                     """
+                    INSERT INTO users (id, email)
+                    VALUES ($1, $2)
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    user_id,
+                    f"{user_id}@clerk.placeholder",
+                )
+                await conn.execute(
+                    """
                     INSERT INTO document_upload_logs
                       (id, user_id, original_filename, document_type, document_subtype,
                        extraction_status, values_extracted, patient_name,

@@ -72,7 +72,7 @@ class Supervisor:
         )
         if deep_dive is not None and deep_dive.needs_followup and len(follow_up_history) < _MAX_FOLLOWUP:
             # Stop early if key clinical dimensions are already covered
-            if not _findings_sufficient(deep_dive.structured_findings):
+            if not _findings_sufficient(deep_dive.structured_findings, follow_up_history):
                 deduped = _dedup_questions(deep_dive.followup_questions, follow_up_history)
                 filtered = _filter_saturated_topics(deduped, follow_up_history)
                 if filtered:
@@ -579,8 +579,10 @@ def _last_answer_was_selection(follow_up_history: list[dict]) -> bool:
     return follow_up_history[-1].get("question_type") in _SELECTION_TYPES
 
 
-def _findings_sufficient(findings) -> bool:
+def _findings_sufficient(findings, follow_up_history: list[dict]) -> bool:
     """True when core clinical dimensions are covered — safe to stop asking."""
+    if len(follow_up_history) < 4:
+        return False
     return (
         findings.duration is not None
         and findings.severity is not None

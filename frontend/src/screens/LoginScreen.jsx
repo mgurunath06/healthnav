@@ -92,7 +92,7 @@ export default function LoginScreen() {
           </div>
 
           <SignIn
-            forceRedirectUrl="/dashboard"
+            fallbackRedirectUrl="/dashboard"
             appearance={clerkAppearance}
           />
 

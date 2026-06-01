@@ -12,9 +12,9 @@ import os
 #   claude-haiku-3-5         ✗  (unavailable on this key)
 _OPENROUTER_CHAINS: dict[str, list[str]] = {
     "fast_trio": [
-        "anthropic/claude-haiku-4-5",       # no date suffix — correct OpenRouter format
-        "google/gemini-2.5-pro-preview",     # reliable backup
-        "anthropic/claude-sonnet-4-5",       # expensive last resort
+        "google/gemini-2.5-pro-preview",     # reliable primary
+        "anthropic/claude-sonnet-4-5",       # backup
+        "anthropic/claude-haiku-4-5",        # last resort
     ],
     "deep_dive": [
         "google/gemini-2.5-pro-preview",     # promoted to primary (flash fails)

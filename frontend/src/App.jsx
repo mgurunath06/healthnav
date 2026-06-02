@@ -11,6 +11,8 @@ import LoginScreen from './screens/LoginScreen'
 import PremiumDashboard from './components/PremiumDashboard'
 import DocumentUploadScreen from './screens/DocumentUploadScreen'
 import PrivateRoute from './components/PrivateRoute'
+import ProfileScreen from './components/ProfileScreen'
+import ChatScreen from './components/ChatScreen'
 import './App.css'
 
 function InvestigationFlow() {
@@ -35,6 +37,8 @@ export default function App() {
       <Route path="/login"             element={<LoginScreen />} />
       <Route path="/dashboard"         element={<PrivateRoute><PremiumDashboard /></PrivateRoute>} />
       <Route path="/dashboard/upload"  element={<PrivateRoute><DocumentUploadScreen /></PrivateRoute>} />
+      <Route path="/profile"           element={<PrivateRoute><ProfileScreen /></PrivateRoute>} />
+      <Route path="/chat"              element={<PrivateRoute><ChatScreen /></PrivateRoute>} />
     </Routes>
   )
 }

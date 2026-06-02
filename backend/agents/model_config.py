@@ -30,6 +30,10 @@ _OPENROUTER_CHAINS: dict[str, list[str]] = {
         "google/gemini-2.5-pro-preview",     # promoted to primary (flash fails)
         "google/gemini-2.5-flash-preview",   # last resort
     ],
+    "companion": [
+        "google/gemini-2.5-flash-preview",
+        "google/gemini-2.5-pro-preview",
+    ],
 }
 
 # Ollama chains — ordered best → worst quality (spec §2.2)
@@ -39,6 +43,7 @@ _OLLAMA_CHAINS: dict[str, list[str]] = {
     "deep_dive": ["gemma4:latest", "qwen3:14b", "llama3.1:8b"],
     "assembler": ["gemma4:latest", "qwen3:14b", "llama3.1:8b"],
     "doc_extraction": ["llama3.1:8b"],
+    "companion": ["llama3.1:8b"],
 }
 
 # Env vars that override the OpenRouter chain for each role (comma-separated model IDs).
@@ -48,6 +53,7 @@ _OPENROUTER_ENV_VARS: dict[str, str] = {
     "deep_dive": "HEALTHNAV_DEEP_DIVE_MODELS",
     "assembler": "HEALTHNAV_ASSEMBLER_MODELS",
     "doc_extraction": "HEALTHNAV_DOC_EXTRACTION_MODELS",
+    "companion": "HEALTHNAV_COMPANION_MODELS",
 }
 
 

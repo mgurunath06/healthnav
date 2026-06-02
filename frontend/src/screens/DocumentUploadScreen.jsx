@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import Header from '../components/Header'
 import DocumentUpload from '../components/DocumentUpload'
+import DocumentHistoryList from '../components/DocumentHistoryList'
 
 export default function DocumentUploadScreen() {
   return (
@@ -19,6 +20,7 @@ export default function DocumentUploadScreen() {
           </Link>
 
           <DocumentUpload />
+          <DocumentHistoryList />
 
         </div>
       </main>

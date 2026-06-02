@@ -9,7 +9,10 @@ from pydantic import BaseModel, Field
 
 from agents.supervisor import Supervisor
 from db.client import close_pool
+from routers.cards import router as cards_router
+from routers.chat import router as chat_router
 from routers.documents import router as documents_router
+from routers.profiles import router as profiles_router
 
 
 @asynccontextmanager
@@ -18,7 +21,7 @@ async def lifespan(app: FastAPI):
     await close_pool()
 
 
-app = FastAPI(title="HealthNav API", version="1.2", lifespan=lifespan)
+app = FastAPI(title="HealthNav API", version="2.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -28,6 +31,9 @@ app.add_middleware(
 )
 
 app.include_router(documents_router, prefix="/documents")
+app.include_router(profiles_router, prefix="/profiles")
+app.include_router(cards_router, prefix="/cards")
+app.include_router(chat_router, prefix="/chat")
 
 _supervisor = Supervisor()
 
@@ -45,6 +51,8 @@ class InvestigateRequest(BaseModel):
     request_id: str
     symptom_description: str = Field(min_length=10, max_length=2000)
     follow_up_history: list[FollowUpHistoryItem] = []
+    follow_up_answers: dict[str, str] | None = None
+    auth_token: str | None = None
 
 
 # ── Exception handlers ────────────────────────────────────────────────────────
@@ -72,16 +80,27 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "1.2"}
+    return {"status": "ok", "version": "2.0", "tier_support": ["free", "premium"]}
 
 
 @app.post("/investigate")
 async def investigate(req: InvestigateRequest) -> dict:
     try:
+        follow_up_history = [item.model_dump() for item in req.follow_up_history]
+        if req.follow_up_answers and not follow_up_history:
+            follow_up_history = [
+                {
+                    "question_id": key,
+                    "question_text": key,
+                    "question_type": None,
+                    "answer": str(value),
+                }
+                for key, value in req.follow_up_answers.items()
+            ]
         return await _supervisor.run(
             request_id=req.request_id,
             symptom_description=req.symptom_description,
-            follow_up_history=[item.model_dump() for item in req.follow_up_history],
+            follow_up_history=follow_up_history,
         )
     except Exception:
         return {

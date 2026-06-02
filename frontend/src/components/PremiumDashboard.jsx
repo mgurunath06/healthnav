@@ -1,6 +1,9 @@
+import { useEffect, useState } from 'react'
+import { useAuth } from '@clerk/clerk-react'
 import { useUser } from '@clerk/clerk-react'
 import { Link } from 'react-router-dom'
 import Header from './Header'
+import { apiFetch } from '../lib/api'
 
 function timeOfDay() {
   const h = new Date().getHours()
@@ -10,7 +13,33 @@ function timeOfDay() {
 }
 
 export default function PremiumDashboard() {
+  const { getToken } = useAuth()
   const { user } = useUser()
+  const [cards, setCards] = useState([])
+  const [docs, setDocs] = useState([])
+
+  useEffect(() => {
+    let active = true
+    async function load() {
+      try {
+        const token = await getToken()
+        const [cardRows, docRows] = await Promise.all([
+          apiFetch('/cards', { token }),
+          apiFetch('/documents', { token }),
+        ])
+        if (!active) return
+        setCards(cardRows ?? [])
+        setDocs(docRows?.uploads ?? [])
+      } catch {
+        if (active) {
+          setCards([])
+          setDocs([])
+        }
+      }
+    }
+    load()
+    return () => { active = false }
+  }, [getToken])
 
   return (
     <div className="min-h-dvh bg-warm-charcoal flex flex-col">
@@ -47,12 +76,52 @@ export default function PremiumDashboard() {
             </p>
           </Link>
 
+          <div className="grid sm:grid-cols-2 gap-4">
+            <Link
+              to="/chat"
+              className="block border border-warm-border bg-warm-surface rounded px-5 py-4 hover:border-accent/50 transition-colors duration-250"
+            >
+              <p className="font-mono text-xs text-accent tracking-widest uppercase mb-1">
+                Ask HealthNav
+              </p>
+              <p className="font-sans text-sm text-warm-muted">
+                General wellness guidance informed by your records.
+              </p>
+            </Link>
+            <Link
+              to="/profile"
+              className="block border border-warm-border bg-warm-surface rounded px-5 py-4 hover:border-accent/50 transition-colors duration-250"
+            >
+              <p className="font-mono text-xs text-accent tracking-widest uppercase mb-1">
+                Profile
+              </p>
+              <p className="font-sans text-sm text-warm-muted">
+                Review uploaded documents and extracted values.
+              </p>
+            </Link>
+          </div>
+
           {/* Saved prep cards */}
           <section>
             <p className="font-mono text-xs text-warm-muted tracking-widest uppercase mb-4">
               Saved Prep Cards
             </p>
-            <EmptyState message="No saved cards yet" />
+            {cards.length === 0 ? (
+              <EmptyState message="No saved cards yet" />
+            ) : (
+              <div className="space-y-2">
+                {cards.slice(0, 3).map((card) => (
+                  <div key={card.card_id} className="border border-warm-border bg-warm-surface rounded px-4 py-3">
+                    <p className="font-sans text-sm text-warm-off-white line-clamp-1">
+                      {card.summary ?? card.symptom_description ?? 'Doctor Prep Card'}
+                    </p>
+                    <p className="font-mono text-xs text-warm-muted mt-1">
+                      {card.quadrant?.quadrant_label ?? 'Saved'} · {formatDate(card.created_at)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
 
           {/* Health values */}
@@ -68,7 +137,20 @@ export default function PremiumDashboard() {
                 Upload a document →
               </Link>
             </div>
-            <EmptyState message="No documents uploaded yet" />
+            {docs.length === 0 ? (
+              <EmptyState message="No documents uploaded yet" />
+            ) : (
+              <div className="space-y-2">
+                {docs.slice(0, 3).map((doc) => (
+                  <div key={doc.upload_id} className="border border-warm-border bg-warm-surface rounded px-4 py-3">
+                    <p className="font-sans text-sm text-warm-off-white truncate">{doc.original_filename}</p>
+                    <p className="font-mono text-xs text-warm-muted mt-1">
+                      {doc.values_extracted} values · {doc.findings_extracted} findings
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
 
           {/* Upload tile — utility action, dashed border, no fill */}
@@ -94,6 +176,10 @@ export default function PremiumDashboard() {
       </main>
     </div>
   )
+}
+
+function formatDate(value) {
+  return new Date(value).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
 function EmptyState({ message }) {

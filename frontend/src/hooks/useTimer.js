@@ -18,6 +18,7 @@ export function useTimer() {
 
   // Cycle timer — ticks every second, freezes on prep_card
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!startedAt) { setElapsed(0); return }
     if (screen === 'prep_card') {
       setElapsed(Math.floor((Date.now() - startedAt) / 1000))

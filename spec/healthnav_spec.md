@@ -2105,3 +2105,189 @@ Add to `backend/agents/model_config.py`:
 - **Title generation:** Conversation title is auto-set from the first user message (first 80 characters, truncated with ellipsis). Not editable in v1.
 - **No cross-user data:** The context injection must only include data owned by `current_user_id`. This is enforced at the query level, not assumed from the client.
 - **Deletion is permanent:** Deleting a conversation cascades to all messages. No soft-delete in v1.
+## 25. Document History Management (Sprint 7)
+
+25.1 Overview
+Users have the right to view, inspect, and delete their uploaded document history. This section specifies the data management rules, API contracts, duplicate detection, and frontend UX for that capability.
+Design decisions locked:
+
+Deletion is soft — is_deleted = true on the log row; extracted values and findings are hidden from UI but retained in DB. No physical row removal.
+Duplicate detection uses content hash — warns the user but allows re-upload.
+History view is summary + expandable detail per upload.
+
+
+25.2 Schema changes
+Add to document_upload_logs:
+sqlALTER TABLE document_upload_logs
+  ADD COLUMN is_deleted       BOOLEAN     DEFAULT FALSE,
+  ADD COLUMN deleted_at       TIMESTAMPTZ,
+  ADD COLUMN content_hash     VARCHAR(64);   -- SHA-256 of raw file bytes, hex string
+Rules:
+
+content_hash is computed server-side from the raw file bytes before any processing. Never derived from filename.
+is_deleted = true hides the row from all GET /documents responses. The row and all FK'd rows in extracted_health_values and document_findings remain physically present in DB.
+Soft-deleted rows are excluded from duplicate hash checks — a document previously uploaded and deleted is treated as new on re-upload.
+
+
+25.3 Duplicate detection
+Trigger: On POST /documents/upload, after reading the file into memory and computing content_hash, query:
+sqlSELECT id, original_filename, uploaded_at, extraction_status
+FROM document_upload_logs
+WHERE user_id = $1
+  AND content_hash = $2
+  AND is_deleted = FALSE
+LIMIT 1;
+If a match is found:
+Response shape (HTTP 200, not 409):
+json{
+  "duplicate_detected": true,
+  "existing_upload": {
+    "upload_id": "uuid",
+    "original_filename": "bloodtest_jan.pdf",
+    "uploaded_at": "2026-01-15T10:30:00Z",
+    "extraction_status": "success"
+  }
+}
+The file is not processed yet at this point. The frontend shows the warning modal (§25.6) and waits for explicit user confirmation. If the user confirms, the frontend re-calls POST /documents/upload with an additional field:
+json{ "force_reupload": true }
+With force_reupload = true, the duplicate check is skipped and processing proceeds normally.
+If no match: Processing proceeds as normal (§19.4).
+
+25.4 API contracts
+GET /documents — List upload history (Premium only)
+Query params:
+
+profile_id (optional UUID) — filter by profile; defaults to all profiles for the user
+include_deleted (optional bool, default false) — reserved for future admin use; always false for user-facing calls
+
+jsonResponse (200):
+{
+  "uploads": [
+    {
+      "upload_id": "uuid",
+      "profile_id": "uuid",
+      "profile_display_name": "Mum",
+      "original_filename": "echo_report_march.pdf",
+      "document_type": "imaging_report",
+      "document_subtype": "echo",
+      "uploaded_at": "2026-03-15T09:12:00Z",
+      "recorded_date": "2026-03-10",
+      "extraction_status": "success",
+      "values_extracted": 4,
+      "findings_extracted": 7,
+      "hospital_or_lab": "Apollo Hospital",
+      "reporting_doctor": "Dr. S. Mehta",
+      "patient_name": "Mum"
+    }
+  ],
+  "total": 12
+}
+GET /documents/{upload_id} — Full detail for one upload (Premium only)
+jsonResponse (200):
+{
+  "upload_id": "uuid",
+  "profile_id": "uuid",
+  "profile_display_name": "Mum",
+  "original_filename": "echo_report_march.pdf",
+  "document_type": "imaging_report",
+  "document_subtype": "echo",
+  "uploaded_at": "2026-03-15T09:12:00Z",
+  "recorded_date": "2026-03-10",
+  "extraction_status": "success",
+  "hospital_or_lab": "Apollo Hospital",
+  "reporting_doctor": "Dr. S. Mehta",
+  "referring_doctor": "Dr. R. Iyer",
+  "patient_name": "Mum",
+  "processing_note": null,
+  "numeric_values": [
+    { "name": "LVEF", "value": "62", "unit": "%", "reference_range": "55-70%", "is_abnormal": false }
+  ],
+  "findings": [
+    { "section": "Left Ventricle", "finding": "Normal size and systolic function.", "is_abnormal": false }
+  ],
+  "conclusions": ["Normal study.", "No wall motion abnormality detected."]
+}
+Response (403) if upload_id belongs to a different user.
+Response (404) if upload not found or is_deleted = true.
+DELETE /documents/{upload_id} — Soft delete (Premium only)
+jsonResponse (200):
+{
+  "deleted": true,
+  "upload_id": "uuid",
+  "note": "Your extracted health values have been hidden from your profile. This action can be reversed by contacting support."
+}
+
+Response (403): { "error": "FORBIDDEN" }
+Response (404): { "error": "NOT_FOUND" }
+Backend sets:
+sqlUPDATE document_upload_logs
+SET is_deleted = TRUE, deleted_at = NOW()
+WHERE id = $1 AND user_id = $2;
+Extracted values and findings are not touched in DB. They are excluded at query time by joining on is_deleted = FALSE.
+Query pattern to exclude soft-deleted data everywhere:
+sql-- Always apply this filter when fetching values/findings for display
+SELECT ev.* FROM extracted_health_values ev
+JOIN document_upload_logs dul ON dul.id = ev.upload_log_id
+WHERE ev.user_id = $1
+  AND (dul.is_deleted = FALSE OR ev.upload_log_id IS NULL);
+
+25.5 What "my data" means — user-visible scope
+The following is what a user can see and manage under their document history:
+Data typeVisible in historyDeletable by userPermanently removed on deleteUpload log entry✅✅ (soft)❌Extracted numeric values✅ (expandable)Via upload delete❌ (hidden, not removed)Document findings✅ (expandable)Via upload delete❌ (hidden, not removed)Original file❌ (never stored)N/AN/AContent hash❌ (internal only)N/AN/A
+User-facing copy for delete confirmation modal:
+
+"This will remove this document from your health history. Extracted values like test results and findings will no longer appear in your profile or influence your health companion. The data is retained securely and cannot be recovered via the app."
+
+
+25.6 Frontend — Document history UX
+Location: <ProfileScreen /> under a "Uploaded Documents" section, already referenced in §19.4. This section specifies it fully.
+<DocumentHistoryList /> component:
+
+Renders one <DocumentHistoryRow /> per upload, sorted by uploaded_at descending.
+Profile filter dropdown at the top (uses <ProfileSelector />) — defaults to "All profiles".
+Empty state: "No documents uploaded yet. Upload a blood test or report to get started."
+
+<DocumentHistoryRow /> — summary row (collapsed by default):
+Shows: document type icon · filename · profile badge · uploaded date · values_extracted count · extraction_status badge.
+Status badge colours:
+
+success → Sage Green (#6B8F71)
+partial → Warm Amber (#C49A3C)
+failed → Deep Terracotta (#B84C3A)
+
+Expand chevron on the right. Click anywhere on row → expands inline (no new route).
+<DocumentHistoryDetail /> — expanded state (inline below the row):
+Sections rendered in order:
+
+Document meta — hospital/lab, reporting doctor, referring doctor, patient name, document date, document subtype.
+Numeric values — table: Name · Value · Unit · Reference Range · Abnormal flag. Abnormal rows highlighted with left border border-quadrant-q1.
+Findings — accordion per section heading. Abnormal findings get the same left border treatment.
+Conclusions — bulleted list.
+Processing note — shown only if non-null, in warm-muted italic text.
+Delete action — text-quadrant-q1 text link "Remove from history" at the bottom right of the expanded panel.
+
+Delete confirmation modal:
+
+Triggered by "Remove from history" link.
+Modal on bg-warm-surface, 4px top border border-quadrant-q1.
+Body copy as specified in §25.5.
+Two buttons: "Remove" (bg-quadrant-q1 fill) · "Keep it" (muted text link).
+On confirm → DELETE /documents/{upload_id} → row animates out (400ms fade + collapse) → toast: "Document removed from your history."
+
+Duplicate warning modal (triggered before upload processing, §25.3):
+
+Renders on bg-warm-surface, centred.
+Heading (monospace overline): "DUPLICATE DETECTED"
+Body: "Looks like you've uploaded this file before — [original_filename] on [uploaded_at date]. Do you want to upload it again?"
+Two buttons: "Upload Anyway" (outlined Sienna) · "Cancel" (muted text link).
+"Upload Anyway" → re-calls POST /documents/upload with force_reupload: true.
+
+
+25.7 Constraints and rules
+
+Ownership enforced at API layer. GET /documents/{id} and DELETE /documents/{id} always verify upload_log.user_id = current_user_id. Client-supplied IDs are never trusted.
+Soft-deleted rows excluded everywhere. Any query that returns health values, findings, reminders, or companion context must join against document_upload_logs and filter is_deleted = FALSE.
+Content hash computed once. On upload, before any LLM call. Never recomputed. SHA-256 of raw bytes as hex string stored in content_hash.
+Duplicate check skipped for force_reupload = true. No further duplicate check; a new log row is created as normal.
+No bulk delete in v1. Users delete one upload at a time. Bulk operations deferred.
+Sprint assignment: GET /documents, GET /documents/{id}, soft delete, and duplicate detection all land in Sprint 7 alongside the upload pipeline. The content_hash column and is_deleted column must be added in migration 003 alongside the profiles migration.

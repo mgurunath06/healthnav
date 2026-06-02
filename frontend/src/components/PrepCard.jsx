@@ -1,7 +1,9 @@
 import { useRef, useState } from 'react'
 import html2canvas from 'html2canvas'
+import { useAuth, useUser } from '@clerk/clerk-react'
 import { useInvestigationStore } from '../store/useInvestigationStore'
 import { useInvestigation } from '../hooks/useInvestigation'
+import { apiFetch } from '../lib/api'
 import Header from './Header'
 
 const QUADRANT_STYLES = {
@@ -13,9 +15,15 @@ const QUADRANT_STYLES = {
 
 export default function PrepCard() {
   const apiResponse = useInvestigationStore((s) => s.apiResponse)
+  const requestId = useInvestigationStore((s) => s.requestId)
+  const symptomDescription = useInvestigationStore((s) => s.symptomDescription)
   const { reset } = useInvestigation()
+  const { getToken } = useAuth()
+  const { isSignedIn } = useUser()
   const cardRef = useRef(null)
   const [sharing, setSharing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
 
   const card = apiResponse?.doctor_prep_card
   if (!card) return null
@@ -59,6 +67,28 @@ export default function PrepCard() {
       setSharing(false)
     }
   }
+  async function handleSave() {
+    if (!isSignedIn || saved) return
+    setSaving(true)
+    try {
+      const token = await getToken()
+      await apiFetch('/cards', {
+        token,
+        method: 'POST',
+        body: JSON.stringify({
+          request_id: requestId,
+          symptom_description: symptomDescription,
+          prep_card: card,
+        }),
+      })
+      setSaved(true)
+    } catch {
+      setSaved(false)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase()
 
   return (
@@ -225,6 +255,15 @@ export default function PrepCard() {
               >
                 {sharing ? 'Capturing…' : '↗ Share Card'}
               </button>
+              {isSignedIn && (
+                <button
+                  onClick={handleSave}
+                  disabled={saving || saved}
+                  className="px-5 py-2.5 rounded-lg border border-warm-border text-warm-muted font-sans text-sm font-medium hover:border-warm-off-white hover:text-warm-off-white transition-colors duration-250 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {saved ? 'Saved' : saving ? 'Saving...' : 'Save Card'}
+                </button>
+              )}
             </div>
             <button
               onClick={reset}

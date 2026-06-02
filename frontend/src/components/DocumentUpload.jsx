@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react'
 import { useAuth, useUser } from '@clerk/clerk-react'
+import { API_BASE } from '../lib/api'
+import ProfileSelector from './ProfileSelector'
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
 const MAX_BYTES = 10 * 1024 * 1024
 const ALLOWED_TYPES = new Set(['application/pdf', 'image/jpeg', 'image/png'])
 
@@ -22,8 +23,10 @@ export default function DocumentUpload() {
   const [phase, setPhase]       = useState('idle')  // idle | disclosure_modal | uploading | result
   const [file, setFile]         = useState(null)
   const [docType, setDocType]   = useState('')
+  const [profileId, setProfileId] = useState('')
   const [fileError, setFileError] = useState('')
   const [result, setResult]     = useState(null)
+  const [duplicate, setDuplicate] = useState(null)
 
   function openDisclosure() {
     setPhase('disclosure_modal')
@@ -58,15 +61,18 @@ export default function DocumentUpload() {
     setFile(picked)
   }
 
-  async function onUpload() {
+  async function onUpload(forceReupload = false) {
     if (!file || !docType) return
     setPhase('uploading')
+    setDuplicate(null)
 
     try {
       const token = await getToken()
       const form = new FormData()
       form.append('file', file)
       form.append('document_type', docType)
+      if (profileId) form.append('profile_id', profileId)
+      if (forceReupload) form.append('force_reupload', 'true')
 
       const resp = await fetch(`${API_BASE}/documents/upload`, {
         method: 'POST',
@@ -75,6 +81,11 @@ export default function DocumentUpload() {
       })
 
       const data = await resp.json().catch(() => ({}))
+      if (resp.ok && data.duplicate_detected) {
+        setDuplicate(data.existing_upload)
+        setPhase('idle')
+        return
+      }
 
       setResult(resp.ok
         ? { ...data, _filename: file.name }
@@ -91,8 +102,10 @@ export default function DocumentUpload() {
     setPhase('idle')
     setFile(null)
     setDocType('')
+    setProfileId('')
     setFileError('')
     setResult(null)
+    setDuplicate(null)
   }
 
   if (phase === 'result') {
@@ -103,6 +116,13 @@ export default function DocumentUpload() {
     <>
       {phase === 'disclosure_modal' && (
         <DisclosureModal onCancel={closeDisclosure} onConfirm={confirmDisclosure} />
+      )}
+      {duplicate && (
+        <DuplicateModal
+          existing={duplicate}
+          onCancel={() => setDuplicate(null)}
+          onConfirm={() => onUpload(true)}
+        />
       )}
 
       <input
@@ -124,9 +144,11 @@ export default function DocumentUpload() {
           <IdleContent
             file={file}
             docType={docType}
+            profileId={profileId}
             fileError={fileError}
             onTrigger={openDisclosure}
             onTypeChange={setDocType}
+            onProfileChange={setProfileId}
             onUpload={onUpload}
             onChangeFile={() => fileInputRef.current?.click()}
           />
@@ -173,7 +195,7 @@ function DisclosureModal({ onCancel, onConfirm }) {
 
 // ── Idle Content ──────────────────────────────────────────────────────────────
 
-function IdleContent({ file, docType, fileError, onTrigger, onTypeChange, onUpload, onChangeFile }) {
+function IdleContent({ file, docType, profileId, fileError, onTrigger, onTypeChange, onProfileChange, onUpload, onChangeFile }) {
   const canUpload = !!file && !!docType
 
   if (!file) {
@@ -233,9 +255,11 @@ function IdleContent({ file, docType, fileError, onTrigger, onTypeChange, onUplo
         </select>
       </div>
 
+      <ProfileSelector value={profileId} onChange={onProfileChange} />
+
       {/* Upload */}
       <button
-        onClick={onUpload}
+        onClick={() => onUpload(false)}
         disabled={!canUpload}
         className="w-full px-5 py-2.5 rounded-lg bg-accent text-white font-sans text-sm font-medium
                    hover:bg-accent/90 transition-colors duration-250
@@ -252,12 +276,39 @@ function IdleContent({ file, docType, fileError, onTrigger, onTypeChange, onUplo
 function UploadingState() {
   return (
     <div className="flex flex-col items-center justify-center gap-4 py-10">
-      <div className="w-8 h-8 border-[3px] border-accent border-t-transparent rounded-full animate-spin" />
-      <p className="font-sans text-sm text-warm-muted">
+      <div className="h-px w-48 bg-accent animate-agent-trace-pulse" />
+      <p className="font-sans text-sm text-warm-muted animate-agent-trace-pulse">
         Extracting health values from your document…
       </p>
     </div>
   )
+}
+
+function DuplicateModal({ existing, onCancel, onConfirm }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/60">
+      <div className="bg-warm-surface border border-warm-border rounded w-full max-w-md p-7">
+        <p className="font-mono text-xs text-accent tracking-widest uppercase mb-3">
+          Duplicate detected
+        </p>
+        <p className="font-sans text-sm text-warm-muted leading-relaxed mb-6">
+          Looks like you&apos;ve uploaded this file before - {existing.original_filename} on {formatDate(existing.uploaded_at)}. Do you want to upload it again?
+        </p>
+        <div className="flex gap-3 justify-end">
+          <button onClick={onCancel} className="font-sans text-sm text-warm-muted hover:text-warm-off-white">
+            Cancel
+          </button>
+          <button onClick={onConfirm} className="px-4 py-2 rounded border border-accent text-accent font-sans text-sm">
+            Upload Anyway
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function formatDate(value) {
+  return new Date(value).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
 // ── Result View ───────────────────────────────────────────────────────────────

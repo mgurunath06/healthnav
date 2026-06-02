@@ -12,14 +12,13 @@ export default function QuestionWizard() {
 
   const isLoading   = screen === 'loading'
   const question    = apiResponse?.questions?.[0]
-  const roundNumber = followUpHistory.length + 1
-
   const [answer,     setAnswer]     = useState(null)
   const [otherText,  setOtherText]  = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
     if (!isLoading) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setAnswer(null)
       setOtherText('')
       setSubmitting(false)

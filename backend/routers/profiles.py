@@ -164,7 +164,7 @@ async def delete_profile(
     return {"deleted": True, "profile_id": profile_id}
 
 
-async def _ensure_self_profile(conn, user_id: str) -> None:
+async def _ensure_self_profile(conn, user_id: uuid.UUID) -> None:
     existing = await conn.fetchrow(
         "SELECT id FROM profiles WHERE user_id = $1 AND COALESCE(relation, relationship) = 'self'",
         user_id,

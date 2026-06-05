@@ -114,7 +114,7 @@ async def get_card(
     return _card(row, row["profile_display_name"], detail=True)
 
 
-async def _assert_profile_owner(conn, profile_id: uuid.UUID, user_id: str) -> None:
+async def _assert_profile_owner(conn, profile_id: uuid.UUID, user_id: uuid.UUID) -> None:
     row = await conn.fetchrow("SELECT id FROM profiles WHERE id = $1 AND user_id = $2", profile_id, user_id)
     if row is None:
         raise HTTPException(status_code=403, detail="FORBIDDEN")

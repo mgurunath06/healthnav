@@ -1,22 +1,21 @@
 from __future__ import annotations
 
+import uuid
+
 from asyncpg import Connection
 
 
-def db_user_id(clerk_user_id: str) -> str:
-    """Return Clerk's user id as stored in users.id."""
-    return clerk_user_id
-
-
-async def ensure_user(conn: Connection, clerk_user_id: str) -> str:
-    user_id = db_user_id(clerk_user_id)
-    await conn.execute(
+async def ensure_user(conn: Connection, clerk_user_id: str) -> uuid.UUID:
+    """Resolve a Clerk user to HealthNav's internal UUID, creating it if needed."""
+    row = await conn.fetchrow(
         """
-        INSERT INTO users (id, email)
-        VALUES ($1, $2)
-        ON CONFLICT (id) DO NOTHING
+        INSERT INTO users (clerk_user_id, email, last_active_at)
+        VALUES ($1, $2, NOW())
+        ON CONFLICT (clerk_user_id) DO UPDATE
+        SET last_active_at = NOW()
+        RETURNING id
         """,
-        user_id,
+        clerk_user_id,
         f"{clerk_user_id}@clerk.placeholder",
     )
-    return user_id
+    return row["id"]

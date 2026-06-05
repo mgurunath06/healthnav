@@ -3,7 +3,11 @@ from unittest import TestCase
 
 from pydantic import ValidationError
 
-from agents.supervisor import _FOLLOWUP_BUDGETS, _findings_sufficient
+from agents.supervisor import (
+    _FOLLOWUP_BUDGETS,
+    _findings_sufficient,
+    _last_answer_was_selection,
+)
 from main import InvestigateRequest
 
 
@@ -25,7 +29,7 @@ class InvestigationDepthTests(TestCase):
                 )
 
     def test_followup_budgets_increase_with_depth(self) -> None:
-        self.assertEqual(_FOLLOWUP_BUDGETS, {1: 0, 2: 2, 3: 4, 4: 6, 5: 8})
+        self.assertEqual(_FOLLOWUP_BUDGETS, {1: 0, 2: 1, 3: 2, 4: 4, 5: 6})
 
     def test_thorough_depth_does_not_stop_at_standard_threshold(self) -> None:
         findings = SimpleNamespace(
@@ -38,3 +42,15 @@ class InvestigationDepthTests(TestCase):
 
         self.assertTrue(_findings_sufficient(findings, history, 3))
         self.assertFalse(_findings_sufficient(findings, history, 4))
+
+    def test_structured_answers_can_reuse_screening(self) -> None:
+        history = [{"question_type": "scale", "answer": "7"}]
+        self.assertTrue(_last_answer_was_selection(history))
+
+    def test_other_text_must_be_screened(self) -> None:
+        history = [{
+            "question_type": "single_choice",
+            "answer": "something else",
+            "answer_is_free_text": True,
+        }]
+        self.assertFalse(_last_answer_was_selection(history))

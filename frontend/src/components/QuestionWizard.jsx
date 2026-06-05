@@ -48,7 +48,9 @@ export default function QuestionWizard() {
     } else if (Array.isArray(answer) && answer.includes('other')) {
       finalAnswer = [...answer.filter((v) => v !== 'other'), otherText.trim()]
     }
-    submitAnswer(question, finalAnswer)
+    const answerIsFreeText =
+      answer === 'other' || (Array.isArray(answer) && answer.includes('other'))
+    submitAnswer(question, finalAnswer, answerIsFreeText)
   }
 
   function toggleMulti(val) {

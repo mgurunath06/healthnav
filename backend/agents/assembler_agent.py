@@ -232,7 +232,8 @@ class AssemblerAgent:
             {"role": "user", "content": user_content},
         ]
 
-        data = await self._client.chat(role=_MODEL_ROLE, messages=messages, temperature=_TEMPERATURE)
+        role = "assembler_premium" if inp.investigation_depth >= 4 else _MODEL_ROLE
+        data = await self._client.chat(role=role, messages=messages, temperature=_TEMPERATURE)
         try:
             draft = _LLMCardDraft.model_validate(data)
         except ValidationError as exc:

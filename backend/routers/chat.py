@@ -78,7 +78,7 @@ async def post_chat(
             FROM chat_messages
             WHERE conversation_id = $1
             ORDER BY created_at DESC
-            LIMIT 20
+            LIMIT 10
             """,
             conversation_uuid,
         )
@@ -240,8 +240,10 @@ async def _build_context(conn, user_id: str, profile_id: uuid.UUID | None) -> di
           AND ($2::UUID IS NULL OR ev.profile_id = $2)
           AND (dul.is_deleted = FALSE OR ev.upload_log_id IS NULL)
           AND (ev.recorded_date IS NULL OR ev.recorded_date >= CURRENT_DATE - INTERVAL '90 days')
-        ORDER BY ev.recorded_date DESC NULLS LAST, ev.created_at DESC
-        LIMIT 50
+        ORDER BY ev.is_abnormal DESC NULLS LAST,
+                 ev.recorded_date DESC NULLS LAST,
+                 ev.created_at DESC
+        LIMIT 15
         """,
         user_id,
         profile_id,
@@ -254,8 +256,10 @@ async def _build_context(conn, user_id: str, profile_id: uuid.UUID | None) -> di
         WHERE df.user_id = $1
           AND ($2::UUID IS NULL OR df.profile_id = $2)
           AND (dul.is_deleted = FALSE OR df.upload_log_id IS NULL)
-        ORDER BY df.recorded_date DESC NULLS LAST, df.created_at DESC
-        LIMIT 50
+        ORDER BY df.is_abnormal DESC NULLS LAST,
+                 df.recorded_date DESC NULLS LAST,
+                 df.created_at DESC
+        LIMIT 10
         """,
         user_id,
         profile_id,
@@ -266,7 +270,7 @@ async def _build_context(conn, user_id: str, profile_id: uuid.UUID | None) -> di
         FROM saved_prep_cards
         WHERE user_id = $1 AND ($2::UUID IS NULL OR profile_id = $2)
         ORDER BY created_at DESC
-        LIMIT 5
+        LIMIT 3
         """,
         user_id,
         profile_id,

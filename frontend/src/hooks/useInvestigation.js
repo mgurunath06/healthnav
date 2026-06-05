@@ -24,6 +24,7 @@ export function useInvestigation() {
         symptom_description: symptomDescription,
         investigation_depth: store.investigationDepth,
         follow_up_history: followUpHistory,
+        screening_context: store.apiResponse?.screening_context ?? null,
       }
 
       const res = await fetch(`${API_BASE}/investigate`, {
@@ -54,11 +55,12 @@ export function useInvestigation() {
 
   // Called after user answers one question in the wizard.
   // Appends to history and immediately fires the next round.
-  function submitAnswer(question, answer) {
+  function submitAnswer(question, answer, answerIsFreeText = false) {
     const item = {
       question_id:   question.id,
       question_text: question.question,
       question_type: question.type,   // 'yes_no' | 'single_choice' | 'multi_choice' | 'scale'
+      answer_is_free_text: answerIsFreeText,
       answer: Array.isArray(answer) ? answer.join(', ') : String(answer),
     }
     store.appendFollowUp(item)

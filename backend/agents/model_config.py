@@ -2,59 +2,80 @@ from __future__ import annotations
 
 import os
 
-# OpenRouter chains — ordered primary → backup 1 → backup 2 (spec §2.2)
-#
-# Verified working as of 2026-05-31:
-#   gemini-2.5-pro-preview   ✓  (reliable across all roles)
-#   claude-sonnet-4-5        ✓  (assembler primary, no fallbacks seen)
-#   gemini-2.5-flash-preview ✗  (consistent SERVER_ERROR — kept as last-resort only)
-#   claude-haiku-4-5-20251001 ✗ (date suffix is not a valid OpenRouter slug)
-#   claude-haiku-3-5         ✗  (unavailable on this key)
+# Cost-aware production routing. Stable model slugs are preferred over previews.
 _OPENROUTER_CHAINS: dict[str, list[str]] = {
+    "screening": [
+        "google/gemini-2.5-flash",
+        "anthropic/claude-3.5-haiku",
+        "google/gemini-2.5-pro",
+    ],
     "fast_trio": [
-        "google/gemini-2.5-pro-preview",     # reliable primary
-        "anthropic/claude-sonnet-4-5",       # backup
-        "anthropic/claude-haiku-4-5",        # last resort
+        "google/gemini-2.5-flash",
+        "anthropic/claude-3.5-haiku",
+        "google/gemini-2.5-pro",
     ],
     "deep_dive": [
-        "google/gemini-2.5-pro-preview",     # promoted to primary (flash fails)
-        "anthropic/claude-sonnet-4-5",       # backup
-        "google/gemini-2.5-flash-preview",   # last resort
+        "google/gemini-2.5-flash",
+        "anthropic/claude-3.5-haiku",
+        "google/gemini-2.5-pro",
+    ],
+    "deep_dive_premium": [
+        "google/gemini-2.5-pro",
+        "anthropic/claude-sonnet-4-5",
+        "google/gemini-2.5-flash",
     ],
     "assembler": [
-        "anthropic/claude-sonnet-4-5",       # unchanged — confirmed working
-        "google/gemini-2.5-pro-preview",     # unchanged
-        "google/gemini-2.5-flash-preview",   # last resort
+        "google/gemini-2.5-flash",
+        "anthropic/claude-3.5-haiku",
+        "google/gemini-2.5-pro",
+    ],
+    "assembler_premium": [
+        "anthropic/claude-sonnet-4-5",
+        "google/gemini-2.5-pro",
+        "google/gemini-2.5-flash",
     ],
     "doc_extraction": [
-        "google/gemini-2.5-pro-preview",     # promoted to primary (flash fails)
-        "google/gemini-2.5-flash-preview",   # last resort
+        "google/gemini-2.5-flash",
+        "google/gemini-2.5-pro",
     ],
     "companion": [
-        "google/gemini-2.5-pro-preview",
-        "anthropic/claude-sonnet-4-5",
-        "google/gemini-2.5-flash-preview",
+        "google/gemini-2.5-flash",
+        "anthropic/claude-3.5-haiku",
+        "google/gemini-2.5-pro",
     ],
 }
 
-# Ollama chains — ordered best → worst quality (spec §2.2)
-# Same order for all roles: start with the most capable locally-available model.
 _OLLAMA_CHAINS: dict[str, list[str]] = {
+    "screening": ["gemma4:latest", "qwen3:14b", "llama3.1:8b"],
     "fast_trio": ["gemma4:latest", "qwen3:14b", "llama3.1:8b"],
     "deep_dive": ["gemma4:latest", "qwen3:14b", "llama3.1:8b"],
+    "deep_dive_premium": ["gemma4:latest", "qwen3:14b", "llama3.1:8b"],
     "assembler": ["gemma4:latest", "qwen3:14b", "llama3.1:8b"],
+    "assembler_premium": ["gemma4:latest", "qwen3:14b", "llama3.1:8b"],
     "doc_extraction": ["llama3.1:8b"],
     "companion": ["llama3.1:8b"],
 }
 
-# Env vars that override the OpenRouter chain for each role (comma-separated model IDs).
-# Example: HEALTHNAV_FAST_TRIO_MODELS=anthropic/claude-haiku-4-5-20251001,anthropic/claude-haiku-3-5
 _OPENROUTER_ENV_VARS: dict[str, str] = {
+    "screening": "HEALTHNAV_SCREENING_MODELS",
     "fast_trio": "HEALTHNAV_FAST_TRIO_MODELS",
     "deep_dive": "HEALTHNAV_DEEP_DIVE_MODELS",
+    "deep_dive_premium": "HEALTHNAV_DEEP_DIVE_PREMIUM_MODELS",
     "assembler": "HEALTHNAV_ASSEMBLER_MODELS",
+    "assembler_premium": "HEALTHNAV_ASSEMBLER_PREMIUM_MODELS",
     "doc_extraction": "HEALTHNAV_DOC_EXTRACTION_MODELS",
     "companion": "HEALTHNAV_COMPANION_MODELS",
+}
+
+_ROLE_MAX_TOKENS: dict[str, int] = {
+    "screening": 450,
+    "fast_trio": 350,
+    "deep_dive": 800,
+    "deep_dive_premium": 1000,
+    "assembler": 1100,
+    "assembler_premium": 1500,
+    "doc_extraction": 1800,
+    "companion": 600,
 }
 
 
@@ -67,6 +88,11 @@ def get_model_chain(role: str, use_ollama: bool) -> list[str]:
     if env_key:
         override = os.getenv(env_key, "").strip()
         if override:
-            return [m.strip() for m in override.split(",") if m.strip()]
+            return [model.strip() for model in override.split(",") if model.strip()]
 
     return list(_OPENROUTER_CHAINS.get(role, []))
+
+
+def get_max_tokens(role: str) -> int:
+    """Return the output-token ceiling for a role."""
+    return _ROLE_MAX_TOKENS.get(role, 800)

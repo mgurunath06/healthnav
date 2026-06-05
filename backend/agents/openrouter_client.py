@@ -5,7 +5,7 @@ import os
 import httpx
 from dotenv import load_dotenv
 
-from .model_config import get_model_chain
+from .model_config import get_max_tokens, get_model_chain
 
 load_dotenv()
 
@@ -62,7 +62,7 @@ class OpenRouterClient:
 
         for i, model in enumerate(chain):
             try:
-                return await self._try_model(model, messages, temperature, timeout)
+                return await self._try_model(role, model, messages, temperature, timeout)
             except AgentFailure as exc:
                 last_error_code = exc.code
                 if exc.code == "MALFORMED_JSON":
@@ -77,6 +77,7 @@ class OpenRouterClient:
 
     async def _try_model(
         self,
+        role: str,
         model: str,
         messages: list[dict],
         temperature: float,
@@ -90,7 +91,7 @@ class OpenRouterClient:
 
         while True:
             try:
-                content = await self._post(model, current_messages, temperature, timeout)
+                content = await self._post(role, model, current_messages, temperature, timeout)
             except _RateLimitError:
                 if rate_limit_count >= 2:
                     raise AgentFailure("RATE_LIMITED")
@@ -103,10 +104,7 @@ class OpenRouterClient:
                 request_fail_count += 1
                 continue
             except _ServerError:
-                if request_fail_count >= 1:
-                    raise AgentFailure("SERVER_ERROR")
-                request_fail_count += 1
-                continue
+                raise AgentFailure("SERVER_ERROR")
 
             try:
                 return json.loads(content)
@@ -118,6 +116,7 @@ class OpenRouterClient:
 
     async def _post(
         self,
+        role: str,
         model: str,
         messages: list[dict],
         temperature: float,
@@ -139,6 +138,7 @@ class OpenRouterClient:
             "model": model,
             "messages": messages,
             "temperature": temperature,
+            "max_tokens": get_max_tokens(role),
         }
         # Ollama does not support response_format (spec §2.3)
         if not self._use_ollama:
@@ -160,10 +160,25 @@ class OpenRouterClient:
             raise _ServerError()
 
         try:
-            content = response.json()["choices"][0]["message"]["content"]
+            payload = response.json()
+            self._log_usage(role, model, payload.get("usage"))
+            content = payload["choices"][0]["message"]["content"]
             return _extract_json(_strip_think_tags(content))
         except (KeyError, IndexError) as exc:
             raise AgentFailure("MALFORMED_JSON") from exc
+
+    def _log_usage(self, role: str, model: str, usage) -> None:
+        if not isinstance(usage, dict):
+            return
+        print(json.dumps({
+            "event_type": "model_usage",
+            "role": role,
+            "model": model,
+            "prompt_tokens": usage.get("prompt_tokens"),
+            "completion_tokens": usage.get("completion_tokens"),
+            "total_tokens": usage.get("total_tokens"),
+            "cost": usage.get("cost"),
+        }), flush=True)
 
     def _log_fallback(
         self,

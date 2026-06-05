@@ -44,6 +44,7 @@ class FollowUpHistoryItem(BaseModel):
     question_id:   str
     question_text: str
     question_type: str | None = None   # 'yes_no' | 'single_choice' | 'multi_choice' | 'scale'
+    answer_is_free_text: bool = False
     answer:        str
 
 
@@ -53,6 +54,7 @@ class InvestigateRequest(BaseModel):
     investigation_depth: int = Field(default=3, ge=1, le=5)
     follow_up_history: list[FollowUpHistoryItem] = []
     follow_up_answers: dict[str, str] | None = None
+    screening_context: dict | None = None
     auth_token: str | None = None
 
 
@@ -103,6 +105,7 @@ async def investigate(req: InvestigateRequest) -> dict:
             symptom_description=req.symptom_description,
             investigation_depth=req.investigation_depth,
             follow_up_history=follow_up_history,
+            screening_context=req.screening_context,
         )
     except Exception:
         return {

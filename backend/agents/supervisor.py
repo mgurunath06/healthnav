@@ -12,9 +12,10 @@ from .guardrail_agent import GuardrailAgent, GuardrailInput, GuardrailOutput
 from .lifestyle_agent import LifestyleAgent, LifestyleInput, LifestyleOutput
 from .openrouter_client import AgentFailure
 from .red_flag_detector import RedFlagDetector, RedFlagInput, RedFlagOutput
+from .screening_agent import ScreeningAgent, ScreeningInput, ScreeningOutput
 from .triage_agent import TriageAgent, TriageInput, TriageOutput
 
-_FOLLOWUP_BUDGETS = {1: 0, 2: 2, 3: 4, 4: 6, 5: 8}
+_FOLLOWUP_BUDGETS = {1: 0, 2: 1, 3: 2, 4: 4, 5: 6}
 
 
 class Supervisor:
@@ -22,6 +23,7 @@ class Supervisor:
         self._guardrail = GuardrailAgent()
         self._triage = TriageAgent()
         self._red_flag = RedFlagDetector()
+        self._screening = ScreeningAgent()
         self._deep_dive = DeepDiveAgent()
         self._lifestyle = LifestyleAgent()
         self._assembler = AssemblerAgent()
@@ -32,6 +34,7 @@ class Supervisor:
         symptom_description: str,
         investigation_depth: int = 3,
         follow_up_history: list[dict] | None = None,
+        screening_context: dict | None = None,
     ) -> dict:
         follow_up_history = follow_up_history or []
         trace: list[dict] = []
@@ -51,10 +54,42 @@ class Supervisor:
         # Subsequent rounds answer structured questions — no new emergency
         # symptoms can emerge from "yes/no" or scale answers, and the initial
         # description has already been screened.
-        guardrail, triage, red_flag, phase1_trace = await self._run_parallel(
-            request_id, symptom_description, follow_up_history
-        )
+        if (
+            follow_up_history
+            and _last_answer_was_selection(follow_up_history)
+            and screening_context
+        ):
+            try:
+                cached_screening = ScreeningOutput.model_validate(screening_context)
+                guardrail = cached_screening.guardrail
+                triage = cached_screening.triage
+                red_flag = cached_screening.red_flag
+                phase1_trace = [
+                    {
+                        "agent": agent,
+                        "status": "skipped",
+                        "decision": "reused initial screening for structured answer",
+                    }
+                    for agent in ("guardrail", "triage", "red_flag_detector")
+                ]
+            except Exception:
+                guardrail, triage, red_flag, phase1_trace = await self._run_parallel(
+                    request_id, symptom_description, follow_up_history
+                )
+        else:
+            guardrail, triage, red_flag, phase1_trace = await self._run_parallel(
+                request_id, symptom_description, follow_up_history
+            )
         trace.extend(phase1_trace)
+        screening_payload = (
+            ScreeningOutput(
+                guardrail=guardrail,
+                triage=triage,
+                red_flag=red_flag,
+            ).model_dump()
+            if guardrail is not None and triage is not None and red_flag is not None
+            else screening_context
+        )
 
         # ── Phase 2: Short-circuit routing ────────────────────────────────────
 
@@ -101,7 +136,13 @@ class Supervisor:
                 deduped = _dedup_questions(deep_dive.followup_questions, follow_up_history)
                 filtered = _filter_saturated_topics(deduped, follow_up_history)
                 if filtered:
-                    return self._needs_followup(request_id, filtered, trace, deep_dive.topic_overview)
+                    return self._needs_followup(
+                        request_id,
+                        filtered,
+                        trace,
+                        deep_dive.topic_overview,
+                        screening_payload,
+                    )
 
         # ── Phase 4: Lifestyle ────────────────────────────────────────────────
         lifestyle: LifestyleOutput | None = None
@@ -114,7 +155,12 @@ class Supervisor:
                 remaining_budget = len(follow_up_history) < min(_MAX_FOLLOWUP, max_followups)
                 lf_filtered = _filter_saturated_topics(lifestyle.followup_questions, follow_up_history)
                 if remaining_budget and lf_filtered:
-                    return self._needs_followup(request_id, lf_filtered, trace)
+                    return self._needs_followup(
+                        request_id,
+                        lf_filtered,
+                        trace,
+                        screening_context=screening_payload,
+                    )
 
         # ── Phase 5: Assembler ────────────────────────────────────────────────
         agents_run = [
@@ -138,6 +184,105 @@ class Supervisor:
         symptom_description: str,
         follow_up_history: list[dict],
     ) -> tuple[GuardrailOutput | None, TriageOutput | None, RedFlagOutput | None, list[dict]]:
+        screening_description = symptom_description
+        if follow_up_history and not _last_answer_was_selection(follow_up_history):
+            latest = follow_up_history[-1]
+            screening_description = (
+                f"{symptom_description}\n\n"
+                f"Latest free-text follow-up answer: {latest.get('answer', '')}"
+            )
+        return await self._run_combined_screening(
+            request_id,
+            screening_description,
+            follow_up_history,
+        )
+
+    async def _run_combined_screening(
+        self,
+        request_id: str,
+        symptom_description: str,
+        follow_up_history: list[dict],
+    ) -> tuple[GuardrailOutput | None, TriageOutput | None, RedFlagOutput | None, list[dict]]:
+        """Produce guardrail, triage, and red-flag outputs with one model call."""
+        started = _iso_now()
+        t = _ms()
+        self._log(request_id, "agent_started", agent="screening")
+        try:
+            result = await self._screening.run(
+                ScreeningInput(symptom_description=symptom_description)
+            )
+            duration = _ms() - t
+            self._log(
+                request_id,
+                "agent_completed",
+                agent="screening",
+                duration_ms=duration,
+            )
+            trace = [
+                {
+                    "agent": "guardrail",
+                    "started_at": started,
+                    "duration_ms": duration,
+                    "status": "ok",
+                    "decision": (
+                        f"should_proceed={result.guardrail.should_proceed}, "
+                        f"confidence={result.guardrail.confidence}"
+                    ),
+                },
+                {
+                    "agent": "triage",
+                    "started_at": started,
+                    "duration_ms": duration,
+                    "status": "ok",
+                    "decision": (
+                        f"category={result.triage.primary_symptom_category}, "
+                        f"urgency={result.triage.urgency_level}"
+                    ),
+                },
+                {
+                    "agent": "red_flag_detector",
+                    "started_at": started,
+                    "duration_ms": duration,
+                    "status": "ok",
+                    "decision": (
+                        f"flags={result.red_flag.red_flags_detected}"
+                        if result.red_flag.red_flags_detected
+                        else "no flags"
+                    ),
+                },
+            ]
+            return result.guardrail, result.triage, result.red_flag, trace
+        except Exception as exc:
+            duration = _ms() - t
+            code = exc.code if isinstance(exc, AgentFailure) else "AGENT_FAILURE"
+            self._log(
+                request_id,
+                "agent_failed",
+                agent="screening",
+                duration_ms=duration,
+                status=code,
+            )
+            trace = [
+                {
+                    "agent": agent,
+                    "started_at": started,
+                    "duration_ms": duration,
+                    "status": "failed",
+                    "decision": default,
+                }
+                for agent, default in (
+                    ("guardrail", "failed - defaulting to should_proceed=true"),
+                    ("triage", "failed - defaulting to routine/general"),
+                    ("red_flag_detector", "failed - defaulting to is_emergency=false"),
+                )
+            ]
+            self._log(
+                request_id,
+                "routing_decision",
+                metadata={"decision": "combined screening failed; using legacy fallback"},
+            )
+
+        # Reliability fallback only: normal traffic returns from the combined call above.
         round_number = len(follow_up_history)
 
         # Red flag: initial round only.
@@ -470,13 +615,21 @@ class Supervisor:
         self._log(request_id, "response_sent", metadata={"status": "emergency"})
         return response
 
-    def _needs_followup(self, request_id: str, questions: list, trace: list[dict], topic_overview=None) -> dict:
+    def _needs_followup(
+        self,
+        request_id: str,
+        questions: list,
+        trace: list[dict],
+        topic_overview=None,
+        screening_context: dict | None = None,
+    ) -> dict:
         self._log_routing(request_id, "needs_followup: deep-dive requested more info", trace)
         response = {
             "status": "needs_followup",
             "request_id": request_id,
             "questions": [q.model_dump(exclude_none=True) for q in questions],
             "topic_overview": topic_overview.model_dump() if topic_overview else None,
+            "screening_context": screening_context,
             "agent_trace": trace,
         }
         self._log(request_id, "response_sent", metadata={"status": "needs_followup"})
@@ -608,7 +761,11 @@ def _last_answer_was_selection(follow_up_history: list[dict]) -> bool:
     """True when the most recent follow-up answer came from a selection UI (not typed)."""
     if not follow_up_history:
         return False
-    return follow_up_history[-1].get("question_type") in _SELECTION_TYPES
+    latest = follow_up_history[-1]
+    return (
+        latest.get("question_type") in _SELECTION_TYPES
+        and not latest.get("answer_is_free_text", False)
+    )
 
 
 def _findings_sufficient(
@@ -617,8 +774,8 @@ def _findings_sufficient(
     investigation_depth: int = 3,
 ) -> bool:
     """True when core clinical dimensions are covered — safe to stop asking."""
-    minimum_by_depth = {1: 0, 2: 2, 3: 4, 4: 6, 5: 8}
-    if len(follow_up_history) < minimum_by_depth.get(investigation_depth, 4):
+    minimum_by_depth = {1: 0, 2: 1, 3: 2, 4: 4, 5: 6}
+    if len(follow_up_history) < minimum_by_depth.get(investigation_depth, 2):
         return False
     return (
         findings.duration is not None

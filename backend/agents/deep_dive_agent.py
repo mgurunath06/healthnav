@@ -11,10 +11,10 @@ _TEMPERATURE = 0.6
 
 _DEPTH_GUIDANCE: dict[int, str] = {
     1: "Quick: do not request follow-up. Extract the best useful findings from the initial description.",
-    2: "Focused: ask at most 2 high-impact follow-ups, prioritising duration and severity.",
-    3: "Standard: ask at most 4 follow-ups for a balanced clinical picture.",
-    4: "Thorough: ask at most 6 useful follow-ups, including triggers, associated symptoms, relief, and daily impact when relevant.",
-    5: "Comprehensive: ask at most 8 useful follow-ups for the fullest non-diagnostic doctor brief, including history and patterns when relevant.",
+    2: "Focused: ask at most 1 high-impact follow-up, prioritising duration or severity.",
+    3: "Standard: ask at most 2 follow-ups for a balanced clinical picture.",
+    4: "Thorough: ask at most 4 useful follow-ups, including triggers, associated symptoms, relief, and daily impact when relevant.",
+    5: "Comprehensive: ask at most 6 useful follow-ups for the fullest non-diagnostic doctor brief, including history and patterns when relevant.",
 }
 
 _SYSTEM_PROMPT = """You are a clinical interviewer for HealthNav, a doctor visit preparation tool. Your job is to build a complete clinical picture of the patient's symptoms through targeted, adaptive questioning — one question at a time.
@@ -178,7 +178,8 @@ class DeepDiveAgent:
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": user_content},
         ]
-        data = await self._client.chat(role=_MODEL_ROLE, messages=messages, temperature=_TEMPERATURE)
+        role = "deep_dive_premium" if inp.investigation_depth >= 4 else _MODEL_ROLE
+        data = await self._client.chat(role=role, messages=messages, temperature=_TEMPERATURE)
         try:
             return DeepDiveOutput.model_validate(data)
         except ValidationError as exc:

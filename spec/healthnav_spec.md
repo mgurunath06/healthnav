@@ -5,6 +5,7 @@
 > **Source of truth:** This document. Code must conform. If reality forces a change, update this doc *first*, then code.
 
 ### Changelog
+- **v2.4** — Cost-aware routing: combined screening replaces three initial LLM calls; structured follow-up answers reuse the initial screening result; investigation depth controls model tier; per-role output-token ceilings and OpenRouter usage telemetry added; chat context and follow-up budgets reduced.
 - **v2.3** — §24 (requested as §22): Health Companion Chat added (Sprint 8 scope). Premium only. Gemini Flash 2.0 (`companion` role). Grounded in user health data. Clinical boundary guardrails mandatory. §22 was already occupied by v2 Implementation Notes — new section placed as §24.
 - **v2.2** — §19.4: enriched extraction schema — `document_meta`, `findings`, `conclusions`, `reporting_doctor`, `hospital_or_lab`, `patient_name` added to extraction output. `document_findings` table added. `document_upload_logs` extended with reporting/referring doctor, hospital, patient name, and document subtype columns. `extracted_health_values` gains `profile_id` FK. §23: Family Profiles added (Sprint 8 scope) — `profiles` table, profile CRUD API, document upload with profile selection, name-match UX, migration 003.
 - **v2.1** — §2.2/§2.5: `doc_extraction` role added (OpenRouter: `google/gemini-flash-2.0` → `google/gemini-pro-2.0`; local: `llama3.1:8b`). §19.4: image path updated — raw bytes sent to Gemini as native vision message, no pytesseract dependency. `recorded_date` behaviour clarified: set from `document_date` in extraction result; `null` if document carries no date (never defaults to upload date).
@@ -80,16 +81,19 @@ The `openrouter_client.py` module handles both providers. Switch via `LLM_PROVID
 
 ### 2.2 Model assignments and fallback chains
 
-Agents reference a **role** (`fast_trio`, `deep_dive`, `assembler`), never a model ID. The client resolves roles to ordered chains and falls back automatically on provider failure.
+Agents reference a **role**, never a model ID. The client resolves roles to ordered chains and falls back automatically on provider failure. Stable model slugs are preferred over preview aliases.
 
 **OpenRouter chains (production):**
 
 | Role | Agents | Primary | Backup 1 | Backup 2 |
 |---|---|---|---|---|
-| `fast_trio` | Guardrail, Triage, Red Flag | `anthropic/claude-haiku-4-5` | `anthropic/claude-haiku-3-5` | `google/gemini-flash-2.0` |
-| `deep_dive` | Deep-Dive, Lifestyle | `google/gemini-flash-2.0` | `google/gemini-flash-1.5` | `anthropic/claude-haiku-4-5` |
-| `assembler` | Assembler | `anthropic/claude-sonnet-4` | `google/gemini-pro-2.0` | `google/gemini-flash-2.0` |
-| `doc_extraction` | Document extraction | `google/gemini-flash-2.0` | `google/gemini-pro-2.0` | — |
+| `screening` | Combined Guardrail + Triage + Red Flag | `google/gemini-2.5-flash` | `anthropic/claude-3.5-haiku` | `google/gemini-2.5-pro` |
+| `deep_dive` | Deep-Dive and Lifestyle, levels 1–3 | `google/gemini-2.5-flash` | `anthropic/claude-3.5-haiku` | `google/gemini-2.5-pro` |
+| `deep_dive_premium` | Deep-Dive, levels 4–5 | `google/gemini-2.5-pro` | `anthropic/claude-sonnet-4-5` | `google/gemini-2.5-flash` |
+| `assembler` | Assembler, levels 1–3 | `google/gemini-2.5-flash` | `anthropic/claude-3.5-haiku` | `google/gemini-2.5-pro` |
+| `assembler_premium` | Assembler, levels 4–5 | `anthropic/claude-sonnet-4-5` | `google/gemini-2.5-pro` | `google/gemini-2.5-flash` |
+| `doc_extraction` | Document extraction | `google/gemini-2.5-flash` | `google/gemini-2.5-pro` | — |
+| `companion` | Ask HealthNav | `google/gemini-2.5-flash` | `anthropic/claude-3.5-haiku` | `google/gemini-2.5-pro` |
 | *(supervisor)* | Supervisor | — (pure Python, no LLM) | — | — |
 
 **Ollama chains (local dev) — ordered best → worst:**
@@ -119,15 +123,34 @@ Chain definitions live in `backend/agents/model_config.py`. OpenRouter chains ar
 | Env var | Overrides role (OpenRouter only) |
 |---|---|
 | `HEALTHNAV_FAST_TRIO_MODELS` | `fast_trio` |
+| `HEALTHNAV_SCREENING_MODELS` | `screening` |
 | `HEALTHNAV_DEEP_DIVE_MODELS` | `deep_dive` |
+| `HEALTHNAV_DEEP_DIVE_PREMIUM_MODELS` | `deep_dive_premium` |
 | `HEALTHNAV_ASSEMBLER_MODELS` | `assembler` |
+| `HEALTHNAV_ASSEMBLER_PREMIUM_MODELS` | `assembler_premium` |
 | `HEALTHNAV_DOC_EXTRACTION_MODELS` | `doc_extraction` |
+| `HEALTHNAV_COMPANION_MODELS` | `companion` |
 
 **Fallback trigger rules:**
-- Try next model on: `5xx` server error, timeout (after its 1 internal retry), rate limit (after its 2 internal retries).
+- Try next model immediately on `5xx` or connection errors. Timeout receives one same-model retry. Rate limit receives two same-model retries with backoff.
 - Do **not** try next model on: malformed JSON — that is a prompt issue. JSON re-prompt retry runs against the same model.
 - All models exhausted → `AgentFailure("ALL_MODELS_EXHAUSTED")`. Supervisor applies §7.3 degradation rules.
 - Each model switch is logged: `event_type: "model_fallback"` with `{role, failed_model, next_model, reason}`.
+
+**Output-token ceilings:**
+
+| Role | Maximum output tokens |
+|---|---:|
+| `screening` | 450 |
+| `deep_dive` | 800 |
+| `deep_dive_premium` | 1000 |
+| `assembler` | 1100 |
+| `assembler_premium` | 1500 |
+| `companion` | 600 |
+| `doc_extraction` | 1800 |
+
+Every successful OpenRouter response logs `model_usage` with role, model,
+prompt tokens, completion tokens, total tokens, and provider-reported cost.
 
 ---
 
@@ -184,11 +207,15 @@ Chain definitions live in `backend/agents/model_config.py`. OpenRouter chains ar
   "follow_up_answers": {
     "question_id": "answer_value"
   },
+  "screening_context": "object, returned by the previous needs_followup response",
   "auth_token": "string, optional, ignored in v1, validated in v2"
 }
 ```
 
-`follow_up_answers` is optional on first call. Frontend re-calls with same `request_id` + `symptom_description` + filled answers when follow-up is needed.
+`follow_up_answers` is optional on first call. Frontend re-calls with the same
+`request_id`, `symptom_description`, accumulated answers, and the opaque
+`screening_context` returned by the previous response. Structured UI answers
+reuse this context; typed free-text answers are screened again.
 
 #### Investigation depth
 
@@ -200,10 +227,10 @@ every level.
 | Level | Label | Follow-up budget | Card detail |
 |---|---|---:|---|
 | 1 | Quick | 0 | Concise essentials |
-| 2 | Focused | Up to 2 | Key context |
-| 3 | Standard | Up to 4 | Balanced detail; default |
-| 4 | Thorough | Up to 6 | Broader clinical context |
-| 5 | Comprehensive | Up to 8 | Most detailed useful brief |
+| 2 | Focused | Up to 1 | Key context |
+| 3 | Standard | Up to 2 | Balanced detail; default |
+| 4 | Thorough | Up to 4 | Broader clinical context |
+| 5 | Comprehensive | Up to 6 | Most detailed useful brief |
 
 Agents may stop before the budget when another question would not materially
 improve the card. Depth must never suppress emergency checks, change clinical
@@ -359,7 +386,7 @@ scoring rules, or create diagnostic certainty.
 ### 5.4 Symptom Deep-Dive Agent
 
 **Model (local):** `gemma4:latest`
-**Model (prod):** `google/gemini-flash-2.0`
+**Model role (prod):** `deep_dive` for levels 1–3, `deep_dive_premium` for levels 4–5.
 **Runs:** After parallel trio, always (if no short-circuit)
 
 **Input:**
@@ -418,7 +445,7 @@ scoring rules, or create diagnostic certainty.
 ### 5.5 Lifestyle Agent
 
 **Model (local):** `gemma4:latest`
-**Model (prod):** `google/gemini-flash-2.0`
+**Model role (prod):** `deep_dive`.
 **Runs:** Conditional (Supervisor decides)
 
 **Input:**
@@ -549,7 +576,9 @@ urgency <  6 AND importance <  6 → Q4: Monitor
 ```
 START
   │
-  ├─ [Parallel] Guardrail + Triage + Red Flag
+  ├─ [One structured call] Combined Guardrail + Triage + Red Flag
+  │     Structured follow-up answers reuse the initial screening result
+  │     "Other" typed text is screened again
   │
   ├─ IF guardrail.should_proceed == false AND confidence == "high"
   │     → REDIRECT response → STOP
@@ -651,7 +680,7 @@ Every event logged to stdout as structured JSON. Railway captures for retrieval.
 - **Timeout:** 30s per agent. Retry once on same model. If still failing → try next model in chain (§2.5).
 - **Malformed JSON:** Pydantic validation. Retry once with stricter prompt against same model. Fail → `AGENT_FAILURE("MALFORMED_JSON")`. Does not trigger model chain fallback.
 - **429 rate limit (OpenRouter):** Exponential backoff (2s, 5s). Max 2 retries on same model. Then → try next model in chain.
-- **5xx server error:** Retry once on same model. Then → try next model in chain.
+- **5xx server or connection error:** Move immediately to the next model in the chain.
 - **Ollama connection error:** Logged as warning. Counts as server error → try next model in chain.
 - **All models exhausted:** `AgentFailure("ALL_MODELS_EXHAUSTED")`. Supervisor applies §7.3 degradation rules.
 - **Partial failures:** See §7.3. System prefers degraded card over complete failure.
@@ -1433,7 +1462,7 @@ Max file size: 10 MB
   → If PDF:      extract text via pdfplumber; pass as plain text to LLM
   → If image:    send raw bytes to Gemini as a native vision message
                  (no OCR library — pytesseract is NOT a dependency)
-  → LLM extraction call (role: doc_extraction → google/gemini-2.5-flash-preview)
+  → LLM extraction call (role: doc_extraction → google/gemini-2.5-flash)
   → Validate extraction with Pydantic
   → Write to document_upload_logs + extracted_health_values + document_findings
   → File buffer discarded — never persisted
@@ -2104,7 +2133,7 @@ Add to `backend/agents/model_config.py`:
 
 **OpenRouter chain:**
 ```
-"companion": ["google/gemini-2.5-flash-preview", "google/gemini-2.5-pro-preview"]
+"companion": ["google/gemini-2.5-flash", "anthropic/claude-3.5-haiku", "google/gemini-2.5-pro"]
 ```
 
 **Ollama chain:**
@@ -2114,7 +2143,7 @@ Add to `backend/agents/model_config.py`:
 
 **Env var override:** `HEALTHNAV_COMPANION_MODELS`
 
-> Note: The spec requested `google/gemini-flash-2.0` and `google/gemini-pro-2.0` — these are replaced with the verified OpenRouter slugs `google/gemini-2.5-flash-preview` / `google/gemini-2.5-pro-preview` per the correction applied in §2.2 (model IDs were confirmed working; the `2.0` suffix format does not exist on OpenRouter).
+> Stable OpenRouter slugs are used. Preview aliases are not used in production routing.
 
 ---
 

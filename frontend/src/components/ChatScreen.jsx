@@ -57,9 +57,14 @@ export default function ChatScreen() {
       ])
       await loadConversations()
     } catch {
+      setInput(text)
       setMessages((rows) => [
         ...rows,
-        { role: 'assistant', content: 'I could not respond just now. Please try again.', disclaimer_shown: false },
+        {
+          role: 'assistant',
+          content: 'The message could not be sent. Your text has been restored so you can retry.',
+          disclaimer_shown: false,
+        },
       ])
     } finally {
       setLoading(false)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,6 +13,7 @@ from db.client import get_pool
 from db.users import ensure_user
 
 router = APIRouter(tags=["chat"])
+logger = logging.getLogger(__name__)
 
 _client = OpenRouterClient()
 _DISCLAIMER = "This is general wellness information - not medical advice. Please discuss with your doctor."
@@ -301,17 +303,66 @@ async def _generate_reply(message: str, context: dict, history: list) -> tuple[s
 
     try:
         data = await _client.chat(role="companion", messages=messages, temperature=0.3)
-    except AgentFailure:
-        return (
-            "I could not review your health context just now. Please try again, and discuss any clinical concerns with your doctor.",
-            ["general_knowledge"],
-        )
+    except AgentFailure as exc:
+        logger.warning("Companion model failure: %s", exc.code)
+        return (_fallback_reply(message, context), ["general_knowledge"])
+    except Exception:
+        logger.exception("Unexpected companion generation failure")
+        return (_fallback_reply(message, context), ["general_knowledge"])
+
+    if not isinstance(data, dict):
+        logger.warning("Companion returned a non-object JSON response")
+        return (_fallback_reply(message, context), ["general_knowledge"])
 
     reply = str(data.get("reply") or "").strip()
-    sources = data.get("sources_used") or ["general_knowledge"]
+    sources = _normalise_sources(data.get("sources_used"))
     if not reply:
-        reply = "That is best discussed with your doctor. I can help you organize what to ask at your visit."
-    return reply, [str(s) for s in sources]
+        return (
+            _fallback_reply(message, context),
+            ["general_knowledge"],
+        )
+    return reply, sources
+
+
+def _normalise_sources(value) -> list[str]:
+    allowed = {"health_values", "document_findings", "prep_cards", "general_knowledge"}
+    if not isinstance(value, list):
+        return ["general_knowledge"]
+    sources = [str(source) for source in value if str(source) in allowed]
+    return sources or ["general_knowledge"]
+
+
+def _fallback_reply(message: str, context: dict) -> str:
+    clinical_question = any(
+        phrase in message.lower()
+        for phrase in (
+            "do i have",
+            "should i take",
+            "am i okay",
+            "is this normal",
+            "what is wrong with me",
+            "diagnose",
+            "dosage",
+        )
+    )
+    has_records = any(
+        context.get(key)
+        for key in ("extracted_health_values", "document_findings", "past_prep_cards")
+    )
+    if clinical_question:
+        return (
+            "That question is best answered by your doctor, who can evaluate you directly. "
+            "I can still help you organize your symptoms, recent results, and questions to discuss with them."
+        )
+    if has_records:
+        return (
+            "I could not complete a full review of your records just now. "
+            "You can ask me to summarize a specific result or help prepare questions for your doctor."
+        )
+    return (
+        "I could not complete the full response just now. "
+        "I can still help with general wellness routines or prepare questions for your doctor."
+    )
 
 
 async def _assert_profile_owner(conn, profile_id: uuid.UUID, user_id: str) -> None:

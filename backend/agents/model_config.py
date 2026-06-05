@@ -31,8 +31,9 @@ _OPENROUTER_CHAINS: dict[str, list[str]] = {
         "google/gemini-2.5-flash-preview",   # last resort
     ],
     "companion": [
-        "google/gemini-2.5-flash-preview",
         "google/gemini-2.5-pro-preview",
+        "anthropic/claude-sonnet-4-5",
+        "google/gemini-2.5-flash-preview",
     ],
 }
 

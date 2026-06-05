@@ -149,6 +149,8 @@ class OpenRouterClient:
                 response = await client.post(url, headers=headers, json=body)
         except httpx.TimeoutException:
             raise _TimeoutError()
+        except httpx.RequestError:
+            raise _ServerError()
 
         if response.status_code == 429:
             raise _RateLimitError()

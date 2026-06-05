@@ -20,14 +20,14 @@ function InvestigationFlow() {
   const followUpHistory = useInvestigationStore((s) => s.followUpHistory)
   const isWizardLoading = screen === 'loading' && followUpHistory.length > 0
 
-  if (screen === 'input')                       return <SymptomInput />
-  if (screen === 'loading' && !isWizardLoading) return <LoadingScreen />
-  if (screen === 'wizard' || isWizardLoading)   return <QuestionWizard />
-  if (screen === 'prep_card')                   return <PrepCard />
-  if (screen === 'emergency')                   return <EmergencyScreen />
-  if (screen === 'redirect')                    return <RedirectScreen />
-  if (screen === 'error')                       return <ErrorScreen />
-  return <SymptomInput />
+  let content = <SymptomInput />
+  if (screen === 'loading' && !isWizardLoading) content = <LoadingScreen />
+  if (screen === 'wizard' || isWizardLoading) content = <QuestionWizard />
+  if (screen === 'prep_card') content = <PrepCard />
+  if (screen === 'emergency') content = <EmergencyScreen />
+  if (screen === 'redirect') content = <RedirectScreen />
+  if (screen === 'error') content = <ErrorScreen />
+  return <div key={screen} className="route-reveal">{content}</div>
 }
 
 export default function App() {

@@ -61,7 +61,7 @@ export default function QuestionWizard() {
   }
 
   return (
-    <div className="min-h-dvh bg-warm-charcoal flex flex-col">
+    <div className="app-canvas min-h-dvh bg-warm-charcoal flex flex-col">
       <Header />
 
       {/* Three-column body */}
@@ -109,8 +109,9 @@ export default function QuestionWizard() {
           {isLoading ? (
             <CenterLoading />
           ) : question ? (
-            <div className="w-full max-w-lg">
-              <h2 className="font-serif text-2xl font-light text-warm-off-white mb-8 leading-snug">
+            <div className="w-full max-w-xl animate-fade-in-up">
+              <p className="eyebrow mb-4">One useful detail</p>
+              <h2 className="font-serif text-3xl sm:text-4xl font-light text-warm-off-white mb-8 leading-tight tracking-[-0.03em]">
                 {question.question}
               </h2>
 
@@ -143,9 +144,9 @@ export default function QuestionWizard() {
                 onClick={handleSubmit}
                 disabled={!canSubmit()}
                 className="
-                  mt-10 w-full py-3.5 rounded-lg font-sans font-medium text-base
-                  bg-accent text-warm-off-white
-                  hover:enabled:bg-accent-hover
+                  mt-10 w-full py-3.5 rounded-full font-sans font-semibold text-sm
+                  bg-accent text-warm-charcoal
+                  hover:enabled:bg-marigold
                   disabled:opacity-40 disabled:cursor-not-allowed
                   transition-colors duration-250
                   focus:outline-none focus-visible:ring-2 focus-visible:ring-accent

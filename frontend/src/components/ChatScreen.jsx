@@ -79,16 +79,16 @@ export default function ChatScreen() {
   }
 
   return (
-    <div className="min-h-dvh bg-warm-charcoal flex flex-col">
+    <div className="app-canvas min-h-dvh bg-warm-charcoal flex flex-col">
       <Header />
       <main className="flex-1 min-h-0 grid md:grid-cols-[16rem_1fr]">
-        <aside className="border-b md:border-b-0 md:border-r border-warm-border p-4 space-y-4 overflow-y-auto">
-          <Link to="/dashboard" className="font-sans text-sm text-warm-muted hover:text-warm-off-white">
-            Back to dashboard
+        <aside className="border-b md:border-b-0 md:border-r border-warm-border p-5 space-y-5 overflow-y-auto bg-warm-surface/35">
+          <Link to="/dashboard" className="editorial-link font-sans text-sm text-warm-muted hover:text-warm-off-white">
+            Dashboard
           </Link>
           <button
             onClick={() => { setConversationId(null); setMessages([]) }}
-            className="w-full px-4 py-2 rounded border border-accent text-accent font-sans text-sm"
+            className="w-full px-4 py-3 rounded-full bg-accent text-warm-charcoal font-sans text-sm font-semibold transition-colors hover:bg-marigold"
           >
             New chat
           </button>
@@ -97,10 +97,10 @@ export default function ChatScreen() {
               <button
                 key={conv.conversation_id}
                 onClick={() => openConversation(conv.conversation_id)}
-                className={`w-full text-left px-3 py-2 rounded border font-sans text-sm transition-colors duration-250 ${
+                className={`w-full text-left px-3 py-3 border-b font-sans text-sm transition-colors duration-250 ${
                   conv.conversation_id === conversationId
-                    ? 'border-accent text-warm-off-white bg-accent/10'
-                    : 'border-warm-border text-warm-muted bg-warm-surface hover:text-warm-off-white'
+                    ? 'border-accent text-warm-off-white'
+                    : 'border-warm-border text-warm-muted hover:text-warm-off-white'
                 }`}
               >
                 <span className="block truncate">{conv.title}</span>
@@ -120,9 +120,12 @@ export default function ChatScreen() {
           <div className="flex-1 overflow-y-auto px-4 py-6">
             <div className="max-w-3xl mx-auto space-y-4">
               {messages.length === 0 ? (
-                <p className="font-serif text-2xl text-warm-off-white font-light">
-                  Ask about your records, routines, or what to discuss with your doctor.
-                </p>
+                <div className="max-w-xl pt-16">
+                  <p className="eyebrow">A quieter place to think</p>
+                  <p className="mt-4 font-serif text-4xl leading-tight text-warm-off-white font-light">
+                    Ask about your records, routines, or what belongs on your doctor&apos;s list.
+                  </p>
+                </div>
               ) : (
                 messages.map((message, i) => <MessageBlock key={i} message={message} />)
               )}
@@ -130,20 +133,20 @@ export default function ChatScreen() {
             </div>
           </div>
 
-          <div className="border-t border-warm-border p-4">
-            <div className="max-w-3xl mx-auto flex gap-3">
+          <div className="border-t border-warm-border p-4 sm:p-6">
+            <div className="editorial-panel max-w-3xl mx-auto flex gap-3 rounded-[1.5rem] p-2">
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value.slice(0, 2000))}
                 onKeyDown={onKeyDown}
                 rows={2}
                 placeholder="Ask a wellness question..."
-                className="flex-1 resize-none rounded bg-warm-surface border border-warm-border text-warm-off-white placeholder-warm-muted font-sans text-sm px-4 py-3 outline-none focus:border-accent"
+                className="flex-1 resize-none rounded-xl bg-transparent border-0 text-warm-off-white placeholder-warm-muted font-sans text-sm px-4 py-3 outline-none"
               />
               <button
                 onClick={send}
                 disabled={!input.trim() || loading}
-                className="self-end px-5 py-3 rounded bg-accent text-warm-off-white font-sans text-sm disabled:opacity-40"
+                className="self-end px-5 py-3 rounded-full bg-accent text-warm-charcoal font-sans text-sm font-semibold disabled:opacity-40"
               >
                 Send
               </button>
@@ -158,9 +161,9 @@ export default function ChatScreen() {
 function MessageBlock({ message }) {
   const assistant = message.role === 'assistant'
   return (
-    <div className={`flex ${assistant ? 'justify-start' : 'justify-end'}`}>
-      <div className={`max-w-[85%] rounded px-5 py-4 border border-warm-border ${assistant ? 'bg-warm-elevated' : 'bg-warm-surface'}`}>
-        <p className={`${assistant ? 'font-serif text-base' : 'font-sans text-sm'} text-warm-off-white leading-relaxed whitespace-pre-wrap`}>
+    <div className={`flex ${assistant ? 'justify-start' : 'justify-end'} animate-fade-in-up`}>
+      <div className={`max-w-[85%] px-5 py-4 ${assistant ? 'border-l-2 border-plum' : 'rounded-2xl bg-accent text-warm-charcoal'}`}>
+        <p className={`${assistant ? 'font-serif text-lg text-warm-off-white' : 'font-sans text-sm text-warm-charcoal'} leading-relaxed whitespace-pre-wrap`}>
           {message.content}
         </p>
         {message.disclaimer_shown && (

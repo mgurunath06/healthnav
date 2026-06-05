@@ -1,6 +1,6 @@
 # UI/UX Design Specification: HealthNav Frontend
 
-**Document Version:** 1.1.0
+**Document Version:** 1.2.0
 **Project:** HealthNav — Symptom Investigation & Doctor Prep Assistant
 **Stack:** React (Vite), Tailwind CSS, Zustand, Custom Hooks (FastAPI Backend)
 
@@ -22,6 +22,27 @@ The design language must reflect a **Fortune 10 Level UI**. The aesthetic is "pr
 * **Progressive Disclosure:** Show only what is strictly necessary at each step.
 * **Analogue Warmth:** Layered matte surfaces, warm shadows, and editorial typography.
 * **Accessibility:** WCAG AA minimum contrast, keyboard navigable, mobile-first.
+* **Distinctive editorial rhythm:** Prefer asymmetrical magazine-like compositions,
+  ruled sections, large type, and purposeful color fields over repeated card grids.
+* **No generic AI signifiers:** No medical emoji, sparkle language, glowing model
+  states, floating mascots, or bubble-heavy assistant layouts.
+
+### 1.1 Refined visual identity
+
+The product identity uses a geometric crossing-path mark with a central point:
+HealthNav helps separate signals meet in one useful brief. The same mark must be
+used in the header, favicon, and install surfaces.
+
+Accent usage expands carefully beyond Burnt Sienna:
+
+| Accent | Hex | Use |
+|---|---|---|
+| Coral | `#EE704B` | Primary action and brand field |
+| Marigold | `#E7AE49` | Progress, highlights, secondary action |
+| Plum | `#8D657E` | Companion and reflective contexts |
+| Sage | `#809A78` | Stable health history and positive state |
+
+These colors appear as flat matte fields, never neon gradients or glows.
 
 ---
 
@@ -77,8 +98,10 @@ The typographic hierarchy mimics a premium printed publication.
 
 ### 4.2 Motion ("Motion with Purpose")
 * **Easing Curve:** `cubic-bezier(0.4, 0.0, 0.2, 1)` ("ease-editorial").
-* **Page Transitions:** Smooth 400ms crossfade (`opacity-0` to `opacity-100`) combined with a subtle upward slide (`translate-y-4` to `translate-y-0`).
-* **State Changes:** 250ms crossfade for background/border colors (e.g., selecting a wizard option). No scaling or "popping".
+* **Page Transitions:** Smooth 400-600ms crossfade combined with a subtle upward
+  reveal. Progress may use line wipes or restrained horizontal runners.
+* **State Changes:** 250ms crossfade for background/border colors. A maximum
+  4px lift may be used on large dashboard action fields; no popping or bounce.
 * **Loading States:** Static blocks colored `bg-warm-elevated` with a slow, subtle opacity shift (opacity 0.6 to 0.8) over 2-3 seconds. **No spinners.**
 
 ---

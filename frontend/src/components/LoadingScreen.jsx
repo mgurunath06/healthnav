@@ -1,12 +1,12 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useInvestigationStore } from '../store/useInvestigationStore'
 import Header from './Header'
 
 const STAGES = [
-  'Checking for urgent clinical indicators',
-  'Classifying symptom category and urgency',
-  'Running deep clinical analysis',
-  'Building your Doctor Prep Card',
+  ['Screening', 'Checking urgency and safety'],
+  ['Listening', 'Finding the details that matter'],
+  ['Structuring', 'Organising the clinical picture'],
+  ['Preparing', 'Writing your doctor brief'],
 ]
 
 export default function LoadingScreen() {
@@ -17,61 +17,58 @@ export default function LoadingScreen() {
   useEffect(() => {
     const id = setInterval(() => {
       setCurrentStage((i) => Math.min(i + 1, STAGES.length - 1))
-    }, 2800)
+    }, 2500)
     return () => clearInterval(id)
   }, [])
 
   return (
-    <div className="min-h-dvh bg-warm-charcoal flex flex-col">
+    <div className="app-canvas flex min-h-dvh flex-col bg-warm-charcoal">
       <Header />
-
-      <div className="flex-1 flex flex-col items-center justify-center px-4">
-        <div className="w-full max-w-sm">
-
-          {/* Serif heading — slow opacity pulse, 3s */}
-          <h1 className="font-serif text-2xl font-light text-warm-off-white text-center mb-2 animate-slow-pulse">
-            {isFollowUp ? 'Analysing your answers…' : 'Analysing clinical findings…'}
+      <main className="mx-auto grid w-full max-w-6xl flex-1 items-center gap-12 px-5 py-12 lg:grid-cols-[0.8fr_1.2fr]">
+        <section>
+          <p className="eyebrow">In progress</p>
+          <h1 className="mt-5 text-balance font-serif text-5xl font-light leading-[1.02] tracking-[-0.04em] text-warm-off-white">
+            {isFollowUp ? 'Adding the new detail.' : 'Turning notes into clarity.'}
           </h1>
-
-          {/* Monospace step counter */}
-          <p className="font-mono text-xs text-warm-muted tracking-widest uppercase text-center mb-10">
-            Agent Step {currentStage + 1} of {STAGES.length}
+          <p className="mt-6 max-w-md font-sans text-base leading-7 text-warm-muted">
+            HealthNav is working through your information in a fixed, careful sequence.
           </p>
+        </section>
 
-          {/* Agent Trace — vertical stack of horizontal lines */}
-          <div className="space-y-5">
-            {STAGES.map((label, i) => {
-              const done    = i < currentStage
+        <section className="editorial-panel rounded-[2rem] p-6 sm:p-8">
+          <div className="mb-8 flex items-baseline justify-between">
+            <p className="font-serif text-2xl text-warm-off-white">{STAGES[currentStage][0]}</p>
+            <span className="font-mono text-xs text-marigold">0{currentStage + 1} / 04</span>
+          </div>
+          <div>
+            {STAGES.map(([label, detail], i) => {
+              const done = i < currentStage
               const current = i === currentStage
               return (
-                <div key={i} className="space-y-2">
-                  {/* Trace line */}
-                  <div
-                    className={[
-                      'h-[4px] w-full rounded-full transition-colors duration-1000',
-                      done    ? 'bg-accent' :
-                      current ? 'bg-warm-elevated animate-agent-trace-pulse' :
-                                'bg-warm-surface',
-                    ].join(' ')}
-                  />
-                  {/* Stage label */}
-                  <p
-                    className={[
-                      'font-mono text-xs tracking-wide transition-colors duration-1000',
-                      done    ? 'text-accent' :
-                      current ? 'text-warm-off-white' :
-                                'text-warm-muted opacity-40',
-                    ].join(' ')}
-                  >
-                    {label}
-                  </p>
+                <div key={label} className="grid grid-cols-[2.5rem_1fr] gap-4">
+                  <div className="relative flex justify-center">
+                    <span className={`relative z-10 mt-1.5 h-3 w-3 rounded-full border ${
+                      done || current ? 'border-accent bg-accent' : 'border-warm-border bg-warm-surface'
+                    }`} />
+                    {i < STAGES.length - 1 && <span className="absolute left-1/2 top-4 h-[calc(100%-0.25rem)] w-px bg-warm-border" />}
+                  </div>
+                  <div className="border-b border-warm-border/60 pb-7 last:border-0">
+                    <p className={`font-sans text-sm ${current ? 'text-warm-off-white' : done ? 'text-accent' : 'text-warm-muted/50'}`}>
+                      {label}
+                    </p>
+                    <p className="mt-1 font-sans text-xs text-warm-muted">{detail}</p>
+                    {current && (
+                      <div className="relative mt-4 h-px overflow-hidden bg-warm-border">
+                        <span className="trace-runner" />
+                      </div>
+                    )}
+                  </div>
                 </div>
               )
             })}
           </div>
-
-        </div>
-      </div>
+        </section>
+      </main>
     </div>
   )
 }

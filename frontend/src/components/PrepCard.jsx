@@ -102,14 +102,14 @@ export default function PrepCard() {
   const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase()
 
   return (
-    <div className="min-h-dvh bg-warm-charcoal flex flex-col">
+    <div className="app-canvas min-h-dvh bg-warm-charcoal flex flex-col">
       <Header />
 
       <div className="flex-1 overflow-y-auto px-4 py-10">
         <div className="w-full max-w-2xl mx-auto">
 
           {/* Card container */}
-          <div ref={cardRef} className="bg-warm-surface rounded-2xl border border-warm-border shadow-matte overflow-hidden print-card">
+          <div ref={cardRef} className="bg-warm-surface rounded-[2rem] border border-warm-border shadow-matte overflow-hidden print-card">
 
             {/* ── Hero ── */}
             <div className="px-8 pt-8 pb-6 border-b border-warm-border flex items-start justify-between gap-4">
@@ -233,7 +233,7 @@ export default function PrepCard() {
             {/* ── Recommended Next Step ── */}
             <Section label="Recommended Next Step">
               <div className="rounded-xl bg-accent/10 border border-accent/30 px-5 py-4 flex gap-4 items-start">
-                <span className="text-accent text-lg mt-0.5">🩺</span>
+                <span className="mt-1.5 h-3 w-3 shrink-0 rounded-full bg-accent" />
                 <div>
                   <p className="font-sans text-sm text-warm-off-white leading-relaxed font-medium">
                     {card.recommended_next_step}

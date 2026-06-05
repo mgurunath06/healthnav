@@ -13,10 +13,19 @@ const QUADRANT_STYLES = {
   Q4: { bg: 'bg-quadrant-q4', border: 'border-quadrant-q4', text: 'text-quadrant-q4', label: 'Monitor' },
 }
 
+const DEPTH_LABELS = {
+  1: 'Quick',
+  2: 'Focused',
+  3: 'Standard',
+  4: 'Thorough',
+  5: 'Comprehensive',
+}
+
 export default function PrepCard() {
   const apiResponse = useInvestigationStore((s) => s.apiResponse)
   const requestId = useInvestigationStore((s) => s.requestId)
   const symptomDescription = useInvestigationStore((s) => s.symptomDescription)
+  const investigationDepth = useInvestigationStore((s) => s.investigationDepth)
   const { reset } = useInvestigation()
   const { getToken } = useAuth()
   const { isSignedIn } = useUser()
@@ -30,6 +39,7 @@ export default function PrepCard() {
 
   const { quadrant } = card
   const qStyle = QUADRANT_STYLES[quadrant?.quadrant_id] ?? QUADRANT_STYLES.Q4
+  const cardDepth = card.investigation_depth ?? investigationDepth
 
   function handlePdf() {
     window.print()
@@ -106,6 +116,9 @@ export default function PrepCard() {
               <div>
                 <p className="font-mono text-xs text-warm-muted tracking-widest uppercase mb-1">Doctor Visit Prep Card</p>
                 <p className="font-mono text-xs text-warm-muted">{today}</p>
+                <p className="font-mono text-xs text-warm-muted mt-1">
+                  {DEPTH_LABELS[cardDepth]} investigation · Level {cardDepth}/5
+                </p>
               </div>
               {/* Quadrant badge */}
               <div className={`flex flex-col items-end gap-1`}>

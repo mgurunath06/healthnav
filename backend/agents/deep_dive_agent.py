@@ -9,6 +9,14 @@ from .openrouter_client import AgentFailure, OpenRouterClient
 _MODEL_ROLE = "deep_dive"
 _TEMPERATURE = 0.6
 
+_DEPTH_GUIDANCE: dict[int, str] = {
+    1: "Quick: do not request follow-up. Extract the best useful findings from the initial description.",
+    2: "Focused: ask at most 2 high-impact follow-ups, prioritising duration and severity.",
+    3: "Standard: ask at most 4 follow-ups for a balanced clinical picture.",
+    4: "Thorough: ask at most 6 useful follow-ups, including triggers, associated symptoms, relief, and daily impact when relevant.",
+    5: "Comprehensive: ask at most 8 useful follow-ups for the fullest non-diagnostic doctor brief, including history and patterns when relevant.",
+}
+
 _SYSTEM_PROMPT = """You are a clinical interviewer for HealthNav, a doctor visit preparation tool. Your job is to build a complete clinical picture of the patient's symptoms through targeted, adaptive questioning — one question at a time.
 
 You receive the patient's symptom description and the full conversation history (every question asked and every answer given so far). Use this to decide:
@@ -62,10 +70,9 @@ Respond ONLY with a valid JSON object — no markdown fences, no text outside th
   multi_choice → multiple answers may apply ("which of these make it worse?")
   scale → intensity or quantity on a spectrum ("rate your pain 1–10")
 - allow_other_text: true only for single_choice and multi_choice when the options may not cover the patient's experience. False for yes_no and scale always.
-- Stop asking (needs_followup=false) when:
-  - duration, severity, and frequency are all known, OR
-  - the conversation history has 5 or more exchanges, OR
-  - additional questions would not meaningfully change the prep card.
+- Respect the investigation depth and maximum follow-up budget supplied in the user message.
+- Stop asking (needs_followup=false) when the depth budget is exhausted or additional questions would not meaningfully change the prep card.
+- For Quick depth, always return needs_followup=false.
 
 --- Structured findings rules ---
 - Extract from the symptom description AND every answer in the conversation history.
@@ -127,6 +134,8 @@ class StructuredFindings(BaseModel):
 class DeepDiveInput(BaseModel):
     symptom_description: str
     primary_symptom_category: str
+    investigation_depth: int = 3
+    max_followups: int = 4
     follow_up_history: list[FollowUpQA] = []
 
 
@@ -158,7 +167,10 @@ class DeepDiveAgent:
 
         user_content = (
             f"Symptom description: {inp.symptom_description}\n"
-            f"Primary symptom category: {inp.primary_symptom_category}"
+            f"Primary symptom category: {inp.primary_symptom_category}\n"
+            f"Investigation depth: {inp.investigation_depth}/5\n"
+            f"Maximum follow-up exchanges: {inp.max_followups}\n"
+            f"Depth guidance: {_DEPTH_GUIDANCE[inp.investigation_depth]}"
             f"{history_section}"
         )
 

@@ -22,6 +22,7 @@ export function useInvestigation() {
       const body = {
         request_id: requestId,
         symptom_description: symptomDescription,
+        investigation_depth: store.investigationDepth,
         follow_up_history: followUpHistory,
       }
 

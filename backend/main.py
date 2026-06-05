@@ -50,6 +50,7 @@ class FollowUpHistoryItem(BaseModel):
 class InvestigateRequest(BaseModel):
     request_id: str
     symptom_description: str = Field(min_length=10, max_length=2000)
+    investigation_depth: int = Field(default=3, ge=1, le=5)
     follow_up_history: list[FollowUpHistoryItem] = []
     follow_up_answers: dict[str, str] | None = None
     auth_token: str | None = None
@@ -100,6 +101,7 @@ async def investigate(req: InvestigateRequest) -> dict:
         return await _supervisor.run(
             request_id=req.request_id,
             symptom_description=req.symptom_description,
+            investigation_depth=req.investigation_depth,
             follow_up_history=follow_up_history,
         )
     except Exception:

@@ -27,6 +27,14 @@ _QUADRANT_ACTIONS: dict[str, str] = {
     "Q4": "Note this for your next routine doctor visit.",
 }
 
+_DEPTH_CARD_GUIDANCE: dict[int, str] = {
+    1: "Quick card: 2-3 key findings and 2-3 doctor questions. Keep every section concise.",
+    2: "Focused card: 3-4 key findings and 3 doctor questions. Emphasise the most actionable context.",
+    3: "Standard card: 3-6 key findings and 3-5 doctor questions with balanced detail.",
+    4: "Thorough card: 5-7 key findings and 4-6 doctor questions. Include broader symptom and lifestyle context.",
+    5: "Comprehensive card: 6-9 key findings and 5-7 doctor questions. Preserve all useful non-diagnostic context without repetition.",
+}
+
 _SYSTEM_PROMPT = """You are the Assembler agent for HealthNav, a doctor visit preparation tool.
 
 Your job: synthesise all agent findings into a clear, structured Doctor Prep Card a patient can take to their appointment.
@@ -49,7 +57,7 @@ Respond ONLY with a valid JSON object — no markdown fences, no text outside th
   ],
   "lifestyle_context": "1-2 sentences on lifestyle factors if a lifestyle assessment was run, otherwise null",
   "questions_to_ask_doctor": [
-    "3-5 specific questions the patient should ask their doctor"
+    "Specific questions the patient should ask their doctor; count follows the supplied depth instruction"
   ],
   "potentially_relevant_specialties": [
     "Medical specialty name only, e.g. 'Neurology', 'Cardiology'"
@@ -60,9 +68,9 @@ Respond ONLY with a valid JSON object — no markdown fences, no text outside th
 
 --- Rules ---
 - summary: plain language, no jargon, no diagnosis, no speculation beyond what findings support.
-- key_findings: 3–6 bullet points. Include duration, severity, triggers, associated symptoms, red flags if any.
+- key_findings: follow the supplied depth instruction. Include duration, severity, triggers, associated symptoms, and red flags when known.
 - lifestyle_context: populate only if lifestyle_output is present in the input. null otherwise.
-- questions_to_ask_doctor: specific to the symptom — not generic. "Should I get a head MRI given my recurring morning headaches?" not "Should I see a doctor?".
+- questions_to_ask_doctor: follow the supplied depth instruction and stay specific to the symptom — not generic. "Should I get a head MRI given my recurring morning headaches?" not "Should I see a doctor?".
 - potentially_relevant_specialties: 1–3 specialties maximum. Only list if genuinely relevant. Empty array [] if unclear.
 - recommended_next_step: ALWAYS recommend professional consultation. Examples: "Schedule an appointment with your GP to discuss these findings." / "Seek medical evaluation promptly given the duration and severity."
 - DO NOT include a quadrant — that is computed separately.
@@ -90,6 +98,7 @@ class QuadrantData(BaseModel):
 
 
 class DoctorPrepCard(BaseModel):
+    investigation_depth: int
     summary: str
     suspected_cause: str | None = None
     symptom_timeline: SymptomTimeline
@@ -104,6 +113,7 @@ class DoctorPrepCard(BaseModel):
 
 class AssemblerInput(BaseModel):
     symptom_description: str
+    investigation_depth: int = 3
     triage_output: TriageOutput | None
     red_flag_output: RedFlagOutput | None
     deep_dive_output: DeepDiveOutput | None
@@ -235,6 +245,7 @@ class AssemblerAgent:
         quadrant = _build_quadrant(urgency, importance)
 
         card = DoctorPrepCard(
+            investigation_depth=inp.investigation_depth,
             summary=draft.summary,
             suspected_cause=draft.suspected_cause,
             symptom_timeline=draft.symptom_timeline,
@@ -250,7 +261,11 @@ class AssemblerAgent:
 
     @staticmethod
     def _build_user_message(inp: AssemblerInput) -> str:
-        sections: list[str] = [f"Symptom description: {inp.symptom_description}"]
+        sections: list[str] = [
+            f"Symptom description: {inp.symptom_description}",
+            f"Investigation depth: {inp.investigation_depth}/5",
+            f"Card detail instruction: {_DEPTH_CARD_GUIDANCE[inp.investigation_depth]}",
+        ]
         sections.append(f"Agents run: {', '.join(inp.agents_run)}")
 
         if inp.triage_output:

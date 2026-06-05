@@ -14,6 +14,8 @@ from .openrouter_client import AgentFailure
 from .red_flag_detector import RedFlagDetector, RedFlagInput, RedFlagOutput
 from .triage_agent import TriageAgent, TriageInput, TriageOutput
 
+_FOLLOWUP_BUDGETS = {1: 0, 2: 2, 3: 4, 4: 6, 5: 8}
+
 
 class Supervisor:
     def __init__(self) -> None:
@@ -28,12 +30,21 @@ class Supervisor:
         self,
         request_id: str,
         symptom_description: str,
+        investigation_depth: int = 3,
         follow_up_history: list[dict] | None = None,
     ) -> dict:
         follow_up_history = follow_up_history or []
         trace: list[dict] = []
+        max_followups = _FOLLOWUP_BUDGETS.get(investigation_depth, 4)
 
-        self._log(request_id, "request_received", metadata={"symptom_hash": _sha256_prefix(symptom_description)})
+        self._log(
+            request_id,
+            "request_received",
+            metadata={
+                "symptom_hash": _sha256_prefix(symptom_description),
+                "investigation_depth": investigation_depth,
+            },
+        )
 
         # ── Phase 1: Parallel agents ──────────────────────────────────────────
         # Red flag runs ONLY on the initial description (round 0).
@@ -68,11 +79,25 @@ class Supervisor:
         # ── Phase 3: Deep-Dive ────────────────────────────────────────────────
         _MAX_FOLLOWUP = 20  # absolute runaway ceiling only
         deep_dive = await self._run_deep_dive(
-            request_id, symptom_description, triage, follow_up_history, trace
+            request_id,
+            symptom_description,
+            triage,
+            investigation_depth,
+            max_followups,
+            follow_up_history,
+            trace,
         )
-        if deep_dive is not None and deep_dive.needs_followup and len(follow_up_history) < _MAX_FOLLOWUP:
+        if (
+            deep_dive is not None
+            and deep_dive.needs_followup
+            and len(follow_up_history) < min(_MAX_FOLLOWUP, max_followups)
+        ):
             # Stop early if key clinical dimensions are already covered
-            if not _findings_sufficient(deep_dive.structured_findings, follow_up_history):
+            if not _findings_sufficient(
+                deep_dive.structured_findings,
+                follow_up_history,
+                investigation_depth,
+            ):
                 deduped = _dedup_questions(deep_dive.followup_questions, follow_up_history)
                 filtered = _filter_saturated_topics(deduped, follow_up_history)
                 if filtered:
@@ -86,8 +111,9 @@ class Supervisor:
             )
             # Lifestyle may also request follow-up (spec §7.1 path 8)
             if lifestyle is not None and lifestyle.needs_followup and len(follow_up_history) < _MAX_FOLLOWUP:
+                remaining_budget = len(follow_up_history) < min(_MAX_FOLLOWUP, max_followups)
                 lf_filtered = _filter_saturated_topics(lifestyle.followup_questions, follow_up_history)
-                if lf_filtered:
+                if remaining_budget and lf_filtered:
                     return self._needs_followup(request_id, lf_filtered, trace)
 
         # ── Phase 5: Assembler ────────────────────────────────────────────────
@@ -97,7 +123,7 @@ class Supervisor:
         ]
         assembler_out = await self._run_assembler(
             request_id, symptom_description, triage, red_flag,
-            deep_dive, lifestyle, agents_run, trace,
+            deep_dive, lifestyle, investigation_depth, agents_run, trace,
         )
         if assembler_out is None:
             # Assembler failed → error with raw outputs (spec §7.3)
@@ -258,6 +284,8 @@ class Supervisor:
         request_id: str,
         symptom_description: str,
         triage: TriageOutput | None,
+        investigation_depth: int,
+        max_followups: int,
         follow_up_history: list[dict],
         trace: list[dict],
     ) -> DeepDiveOutput | None:
@@ -270,6 +298,8 @@ class Supervisor:
                 DeepDiveInput(
                     symptom_description=symptom_description,
                     primary_symptom_category=category,
+                    investigation_depth=investigation_depth,
+                    max_followups=max_followups,
                     follow_up_history=follow_up_history,
                 )
             )
@@ -351,6 +381,7 @@ class Supervisor:
         red_flag: RedFlagOutput | None,
         deep_dive: DeepDiveOutput | None,
         lifestyle: LifestyleOutput | None,
+        investigation_depth: int,
         agents_run: list[str],
         trace: list[dict],
     ) -> AssemblerOutput | None:
@@ -361,6 +392,7 @@ class Supervisor:
             result = await self._assembler.run(
                 AssemblerInput(
                     symptom_description=symptom_description,
+                    investigation_depth=investigation_depth,
                     triage_output=triage,
                     red_flag_output=red_flag,
                     deep_dive_output=deep_dive,
@@ -579,9 +611,14 @@ def _last_answer_was_selection(follow_up_history: list[dict]) -> bool:
     return follow_up_history[-1].get("question_type") in _SELECTION_TYPES
 
 
-def _findings_sufficient(findings, follow_up_history: list[dict]) -> bool:
+def _findings_sufficient(
+    findings,
+    follow_up_history: list[dict],
+    investigation_depth: int = 3,
+) -> bool:
     """True when core clinical dimensions are covered — safe to stop asking."""
-    if len(follow_up_history) < 4:
+    minimum_by_depth = {1: 0, 2: 2, 3: 4, 4: 6, 5: 8}
+    if len(follow_up_history) < minimum_by_depth.get(investigation_depth, 4):
         return False
     return (
         findings.duration is not None

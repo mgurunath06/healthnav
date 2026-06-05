@@ -1,9 +1,18 @@
 import { useState } from 'react'
 import { useInvestigation } from '../hooks/useInvestigation'
+import { useInvestigationStore } from '../store/useInvestigationStore'
 import Header from './Header'
 
 const MIN_CHARS = 10
 const MAX_CHARS = 2000
+
+const DEPTH_OPTIONS = [
+  { level: 1, label: 'Quick', detail: 'Essentials only' },
+  { level: 2, label: 'Focused', detail: 'Up to 2 questions' },
+  { level: 3, label: 'Standard', detail: 'Balanced detail' },
+  { level: 4, label: 'Thorough', detail: 'Up to 6 questions' },
+  { level: 5, label: 'Comprehensive', detail: 'Most detailed brief' },
+]
 
 const STEPS = [
   {
@@ -28,6 +37,8 @@ const STEPS = [
 
 export default function SymptomInput() {
   const [text, setText] = useState('')
+  const investigationDepth = useInvestigationStore((s) => s.investigationDepth)
+  const setInvestigationDepth = useInvestigationStore((s) => s.setInvestigationDepth)
   const { investigate } = useInvestigation()
   const canSubmit = text.trim().length >= MIN_CHARS
 
@@ -114,6 +125,43 @@ export default function SymptomInput() {
                 </span>
               </div>
 
+              <fieldset className="mt-5">
+                <legend className="font-mono text-xs text-warm-muted tracking-widest uppercase mb-3">
+                  Investigation depth
+                </legend>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                  {DEPTH_OPTIONS.map((option) => {
+                    const selected = investigationDepth === option.level
+                    return (
+                      <button
+                        key={option.level}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => setInvestigationDepth(option.level)}
+                        className={`min-h-20 rounded border px-3 py-3 text-left transition-colors duration-250 ${
+                          selected
+                            ? 'border-accent bg-accent/10'
+                            : 'border-warm-border bg-warm-surface hover:border-warm-muted'
+                        }`}
+                      >
+                        <span className={`block font-mono text-xs ${selected ? 'text-accent' : 'text-warm-muted'}`}>
+                          {option.level}/5
+                        </span>
+                        <span className="block font-sans text-sm text-warm-off-white mt-1">
+                          {option.label}
+                        </span>
+                        <span className="block font-sans text-[11px] text-warm-muted mt-1 leading-tight">
+                          {option.detail}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="font-sans text-xs text-warm-muted mt-2">
+                  Safety screening and urgency scoring rules are identical at every level.
+                </p>
+              </fieldset>
+
               <button
                 type="submit"
                 disabled={!canSubmit}
@@ -128,7 +176,7 @@ export default function SymptomInput() {
                   active:enabled:scale-[0.99]
                 "
               >
-                Start Investigation →
+                Start {DEPTH_OPTIONS[investigationDepth - 1].label} Investigation →
               </button>
 
               {!canSubmit && text.length > 0 && (

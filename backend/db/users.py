@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-import uuid
-
 from asyncpg import Connection
 
 
-async def ensure_user(conn: Connection, clerk_user_id: str) -> uuid.UUID:
-    """Resolve a Clerk user to HealthNav's internal UUID, creating it if needed."""
+async def ensure_user(conn: Connection, clerk_user_id: str) -> str:
+    """Ensure the Clerk user exists and return its canonical text ID."""
     row = await conn.fetchrow(
         """
-        INSERT INTO users (clerk_user_id, email, last_active_at)
-        VALUES ($1, $2, NOW())
-        ON CONFLICT (clerk_user_id) DO UPDATE
-        SET last_active_at = NOW()
+        INSERT INTO users (id, clerk_user_id, email, last_active_at)
+        VALUES ($1, $1, $2, NOW())
+        ON CONFLICT (id) DO UPDATE
+        SET clerk_user_id = COALESCE(users.clerk_user_id, EXCLUDED.clerk_user_id),
+            last_active_at = NOW()
         RETURNING id
         """,
         clerk_user_id,

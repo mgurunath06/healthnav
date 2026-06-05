@@ -214,7 +214,7 @@ async def delete_conversation(
     return {"deleted": True, "conversation_id": conversation_id}
 
 
-async def _build_context(conn, user_id: uuid.UUID, profile_id: uuid.UUID | None) -> dict:
+async def _build_context(conn, user_id: str, profile_id: uuid.UUID | None) -> dict:
     profile = None
     if profile_id is not None:
         profile = await conn.fetchrow(
@@ -314,7 +314,7 @@ async def _generate_reply(message: str, context: dict, history: list) -> tuple[s
     return reply, [str(s) for s in sources]
 
 
-async def _assert_profile_owner(conn, profile_id: uuid.UUID, user_id: uuid.UUID) -> None:
+async def _assert_profile_owner(conn, profile_id: uuid.UUID, user_id: str) -> None:
     row = await conn.fetchrow("SELECT id FROM profiles WHERE id = $1 AND user_id = $2", profile_id, user_id)
     if row is None:
         raise HTTPException(status_code=403, detail="FORBIDDEN")

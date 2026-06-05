@@ -1,6 +1,6 @@
 -- Migration 004: Premium profiles, saved cards, and companion chat
 
--- Clerk IDs are strings, but all application tables reference the internal UUID.
+-- Clerk user IDs are the canonical ownership key in the deployed schema.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS clerk_user_id VARCHAR(255);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR(255);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN DEFAULT FALSE;
@@ -10,6 +10,10 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMPTZ DEFAULT NO
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_clerk_user_id
   ON users (clerk_user_id);
+
+UPDATE users
+SET clerk_user_id = id
+WHERE clerk_user_id IS NULL;
 
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS display_name VARCHAR(255);
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS relation VARCHAR(50);
@@ -61,7 +65,7 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS saved_prep_cards (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id             TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   profile_id          UUID REFERENCES profiles(id) ON DELETE SET NULL,
   request_id          VARCHAR(100) NOT NULL,
   symptom_description TEXT,
@@ -74,7 +78,7 @@ CREATE INDEX IF NOT EXISTS idx_saved_prep_cards_user_created
 
 CREATE TABLE IF NOT EXISTS chat_conversations (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   profile_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
   title      VARCHAR(255),
   created_at TIMESTAMPTZ DEFAULT NOW(),

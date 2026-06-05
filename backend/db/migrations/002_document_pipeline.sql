@@ -7,7 +7,7 @@
 
 CREATE TABLE document_upload_logs (
   id                UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id           UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id           TEXT        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   profile_id        UUID,                              -- FK added in 003
   uploaded_at       TIMESTAMPTZ DEFAULT NOW(),
   original_filename VARCHAR(255) NOT NULL,
@@ -24,7 +24,7 @@ CREATE TABLE document_upload_logs (
 
 CREATE TABLE extracted_health_values (
   id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id         UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id         TEXT        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   upload_log_id   UUID        REFERENCES document_upload_logs(id),
   profile_id      UUID,                                -- FK added in 003
   value_name      VARCHAR(255) NOT NULL,
@@ -38,7 +38,7 @@ CREATE TABLE extracted_health_values (
 
 CREATE TABLE document_findings (
   id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id       UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id       TEXT        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   upload_log_id UUID        REFERENCES document_upload_logs(id),
   profile_id    UUID,                                  -- FK added in 003
   section       VARCHAR(255),

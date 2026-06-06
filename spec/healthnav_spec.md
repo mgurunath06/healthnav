@@ -1057,36 +1057,28 @@ CLERK_PUBLISHABLE_KEY=pk_live_...
 
 ### 15.5 First-time user onboarding flow
 
-Triggered once, on first login (detected by `onboarding_completed = false` in `users` table).
+Triggered on the first authenticated entry to any protected product surface. The
+frontend checks the auto-created `self` profile rather than relying solely on
+`users.onboarding_completed`.
 
 ```
-Step 1 — Welcome screen
-  "Hi [first name]. HealthNav learns from every interaction to become your personal health companion."
-  CTA: "Get Started"
+Single editorial setup surface
+  Required:
+  - Full name
+  - Date of birth
+  - Sex recorded at birth
 
-Step 2 — Location permission
-  "Allow location access for weather-based health nudges"
-  Options: "Allow" | "Maybe Later"
-  Note: location only used for weather API calls, never stored as raw coordinates
+  Optional:
+  - Alternate names used on medical records
+  - Stable health context such as allergies or long-term conditions
 
-Step 3 — Known conditions (optional, skippable)
-  "Any conditions we should know about? (You can always add more later)"
-  Multi-select chips: Diabetes · Hypertension · Asthma · Thyroid · Heart condition · Other (free text)
-  Muted note: "This helps us give you timely reminders. You control what you share."
-  CTA: "Continue" | "Skip for now"
-
-Step 4 — Notification preferences
-  Toggles (all off by default):
-  - Seasonal health nudges
-  - Weather-based alerts
-  - Periodic health reminders (e.g. test due dates)
-  - Investigation pattern insights
-  CTA: "Save Preferences"
-
-Step 5 — Completion
-  "You're all set. HealthNav will get smarter with every conversation."
-  CTA: "Go to Dashboard"
+  Relationship is fixed to "self".
+  CTA: "Create my health profile"
 ```
+
+Dashboard, chat, upload, profile, and signed-in investigation routes remain behind
+this gate until the required self-profile fields are complete. Optional location,
+notification, and condition-preference onboarding is deferred.
 
 ---
 
@@ -1594,7 +1586,10 @@ CREATE TABLE document_findings (
 {
   "upload_id": "uuid",
   "status": "success | partial | failed",
-  "name_match": true,
+  "assigned_profile_id": "uuid",
+  "assigned_profile_name": "Gurunath M",
+  "subject_match_status": "confirmed | reassigned | profile_named | profile_created | selected",
+  "subject_match_confidence": 0.94,
   "document_meta": {
     "document_type": "echo",
     "document_date": "2025-03-15",
@@ -1623,10 +1618,11 @@ CREATE TABLE document_findings (
 **UI confirmation flow:**
 1. User selects profile → selects file → disclosure modal appears
 2. Disclosure acknowledged → file picker opens
-3. Processing spinner: "Extracting health values…"
+3. Restrained line-progress state: "Extracting health values…"
 4. Success: "Found [N] values from [filename]. File has been discarded."
-5. If `name_match = false`: name-mismatch warning shown (see §23.5)
-6. Upload log entry appears in `<ProfileScreen />` under "Uploaded Documents"
+5. Patient identity is matched against profile names and aliases before persistence.
+6. Result names the assigned profile and offers an inline correction selector.
+7. Upload log entry appears under the assigned profile.
 
 ### 19.5 Reminder engine
 
@@ -1834,7 +1830,8 @@ POST  /payments/cancel
 - [ ] Weather nudge fires when temp < 15°C + respiratory history + `nudge_weather = true`
 - [ ] All premium endpoints return `401` with no token, `403` with wrong user's resource
 - [ ] `GET /health` returns `tier_support: ["free", "premium"]`
-- [ ] Onboarding flow completes and sets `onboarding_completed = true`
+- [ ] First authenticated entry requires completion of the self profile's name,
+      date of birth, and sex before product access
 - [ ] Upload log visible in ProfileScreen; no file content retrievable
 
 ---
@@ -1855,29 +1852,30 @@ POST  /payments/cancel
 
 ---
 
-## 23. Family Profiles (Sprint 8)
+## 23. Family Profiles (Implemented v2.6)
 
 > One Premium account can hold multiple named profiles — the account holder plus family members. All uploaded documents, extracted health values, and saved prep cards are associated with a specific profile.
+
+> **Authority note:** The original Sprint 8 draft in this section is superseded by
+> §19.8 and the v2.6 rules below wherever they differ.
 
 ### 23.1 Data model
 
 **`profiles` table:**
 ```sql
-CREATE TABLE profiles (
-  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id       UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  display_name  VARCHAR(100) NOT NULL,
-  relation      VARCHAR(20) NOT NULL CHECK (relation IN ('self','spouse','child','parent','sibling','other')),
-  date_of_birth DATE,
-  created_at    TIMESTAMPTZ DEFAULT NOW()
-);
+profiles (
+  id, user_id, display_name, relation, date_of_birth, sex,
+  aliases JSONB, notes, created_at, updated_at
+)
 ```
 
 **Rules:**
 - The `self` profile is auto-created when a user first signs up (via the auth webhook).
 - Every user must have exactly one profile with `relation = 'self'` at all times.
-- Maximum **10 profiles** per user (enforced at API level, not DB constraint).
-- `display_name` max 100 characters; `relation` must be one of the enum values.
+- Supported relationships include self, mother, father, parent, wife, husband,
+  spouse, son, daughter, child, brother, sister, sibling, grandmother,
+  grandfather, grandchild, aunt, uncle, cousin, and other.
+- Names, aliases, demographics, and notes can be maintained through the same form.
 
 **Foreign key additions (ALTER TABLE — migration 003):**
 ```sql
@@ -1916,8 +1914,11 @@ All endpoints: Premium only. A user can only access their own profiles.
 |---|---|---|
 | `GET` | `/profiles` | List all profiles for the current user |
 | `POST` | `/profiles` | Create a new profile |
-| `PATCH` | `/profiles/{id}` | Update `display_name`, `relation`, `date_of_birth` |
+| `PATCH` | `/profiles/{id}` | Update identity, relationship, demographics, aliases, and notes |
 | `DELETE` | `/profiles/{id}` | Delete a profile (cannot delete the `self` profile) |
+| `GET` | `/profiles/{id}/overview` | Identity, memory, counts, recent documents, and briefs |
+| `GET` | `/profiles/{id}/memory` | Read compact longitudinal memory |
+| `DELETE` | `/profiles/{id}/memory` | Clear compact longitudinal memory |
 
 **`POST /profiles` request:**
 ```json
@@ -1926,29 +1927,31 @@ All endpoints: Premium only. A user can only access their own profiles.
 
 **Validation rules:**
 - `display_name`: required, 1–100 chars, trimmed.
-- `relation`: required, must be one of `self | spouse | child | parent | sibling | other`. Cannot create a second `self` profile.
+- `relation`: required and must use a supported relationship. A second `self`
+  profile cannot be created.
 - `date_of_birth`: optional ISO 8601 date; must be in the past; cannot be more than 120 years ago.
-- Max profiles per user: 10. Return `429` with `{ "error": "PROFILE_LIMIT_REACHED" }` if exceeded.
 
 **`DELETE /profiles/{id}` rules:**
-- Returns `403` if `relation = 'self'`.
+- Returns an error if `relation = 'self'`.
 - Returns `404` if the profile does not belong to the current user.
-- Does **not** cascade-delete health data — associated rows are orphaned (`profile_id = NULL`), not deleted.
+- Deletes that profile's uploads, extracted values, findings, saved briefs,
+  conversations, messages, and compact memory transactionally.
 
 ---
 
 ### 23.3 Document upload with profile selection
 
 - `POST /documents/upload` accepts an optional `profile_id` field (UUID).
-- If `profile_id` is omitted or null → default to the current user's `self` profile.
+- If `profile_id` is omitted or null, the self profile is the default subject.
 - If `profile_id` belongs to a different user → return `403`.
-- The response includes a `name_match` field:
-
-| `name_match` value | Meaning |
-|---|---|
-| `true` | `patient_name` extracted from the document matches the selected profile's `display_name` (case-insensitive substring) |
-| `false` | Names do not match |
-| `null` | `patient_name` could not be extracted from the document |
+- Extracted patient names are matched against profile names and aliases using a
+  confidence threshold.
+- A confident match determines the subject before persistence, even when the user
+  selected another profile.
+- A generic profile may be named from the report. An unmatched named patient may
+  create an independent profile automatically.
+- The response returns `assigned_profile_id`, `assigned_profile_name`,
+  `subject_match_status`, and `subject_match_confidence`.
 
 ---
 
@@ -1964,7 +1967,7 @@ All endpoints: Premium only. A user can only access their own profiles.
 - In the document upload flow — shown as the first step, before the file picker disclosure.
 - On the Premium Dashboard header row — sets the active profile context for all displayed data (health values, saved cards).
 
-**`<ManageProfilesScreen />`** (route: `/dashboard/profiles`):
+**`<ProfileScreen />`** (route: `/profile`):
 - Lists all profiles with `display_name`, `relation`, `date_of_birth`.
 - Add profile button → inline form (display_name, relation, DOB).
 - Edit button per row → inline edit.
@@ -1974,21 +1977,34 @@ All endpoints: Premium only. A user can only access their own profiles.
 
 ### 23.5 Name-match UX
 
-When `name_match = false` after a successful upload, show an inline warning banner **below** the result summary:
+The upload result displays a quiet "Filed automatically" panel with the assigned
+profile and routing outcome:
 
-> **"The name on this document ({patient_name}) doesn't match the selected profile ({profile.display_name}). Was this document uploaded for the right person?"**
+- `confirmed`: extracted patient identity agrees with the selected or matched profile
+- `reassigned`: patient identity confidently matched another existing profile
+- `profile_named`: a generic relationship profile was named from the report
+- `profile_created`: a new independent profile was created from the patient identity
+- `selected`: no patient name was available; the selected profile was retained
 
-Two action buttons:
-- **Keep as {profile.display_name}** — dismiss warning, keep association as-is.
-- **Change profile** — opens `<ProfileSelector />` inline; on selection, calls `PATCH /documents/upload/{upload_id}/profile` with the new `profile_id`. (This endpoint is a Sprint 8 addition — stub acceptable in Sprint 7.)
-
-When `name_match = null` — no warning is shown. Missing patient name is treated as an inconclusive result, not an error.
+The profile selector in the result calls `PATCH /documents/{upload_id}/profile`.
+Reassignment updates the upload log, values, findings, and exact document-derived
+memory evidence. Missing patient identity is inconclusive, not an extraction error.
 
 ---
 
 ### 23.6 Migration plan
 
-**`backend/db/migrations/003_profiles.sql`:**
+The deployed schema is cumulative:
+
+- `001_initial.sql` creates users and the original profile table.
+- `004_premium_profiles_cards_chat.sql` adds profile-linked premium artifacts.
+- `006_profile_health_memory.sql` adds compact profile memory.
+- `007_family_profiles.sql` adds aliases, notes, subject-match metadata, and indexes.
+
+Startup guards apply additive family-profile and health-memory schema changes
+idempotently for deployed databases.
+
+Historical reference only:
 ```sql
 -- Step 1: create profiles table
 CREATE TABLE profiles (
@@ -2022,8 +2038,11 @@ UPDATE saved_prep_cards        c SET profile_id = (SELECT id FROM profiles WHERE
 ### 23.7 Constraints and rules
 
 - **Data ownership:** A user can only read or write profiles where `profiles.user_id = current_user_id`. Enforced at the API layer on every endpoint — never rely on the client to pass the correct `user_id`.
-- **Orphaned data:** Deleting a profile sets `profile_id = NULL` on all associated rows (ON DELETE SET NULL). Orphaned rows are shown under "Unknown profile" in the UI. The health data is never deleted.
-- **Profile names are display labels only.** They are not verified against any identity document or Clerk account data. They exist solely to help the user organise their records.
+- **Independent lifecycle:** Deleting a non-self profile permanently removes its
+  dependent health artifacts. It does not reassign them to self or expose them as
+  "Unknown profile."
+- **Identity resolution:** Names and aliases are organizational identifiers used to
+  route extracted patient records. They are not legal identity verification.
 - **Self profile is immutable in key ways:** `relation` cannot be changed from `self`; the profile cannot be deleted. `display_name` and `date_of_birth` can be updated.
 - **Auto-creation trigger:** The `self` profile is created by the Clerk `user.created` webhook handler on first sign-up. If the webhook fails, a fallback creation runs at first login (`GET /profiles` returns an empty list → backend creates the self profile on-the-fly).
 - **Profile selector state:** The last selected profile is stored in `localStorage` keyed by `user_id` so that the selection persists across page refreshes without a backend call.
@@ -2038,12 +2057,18 @@ UPDATE saved_prep_cards        c SET profile_id = (SELECT id FROM profiles WHERE
 
 ### 24.1 Overview
 
-**What it is:** A conversational interface for wellness guidance — diet, lifestyle, schedule, understanding test results in general terms, knowing when to follow up with a doctor.
+**What it is:** A clinically informed, longitudinal health companion that explains
+records, surfaces evidence-supported patterns, prepares useful questions, and
+provides a non-diagnostic differential when asked what conditions may fit.
 
-**What it is not:** A diagnostic tool, a treatment recommender, or a second opinion engine.
+**What it is not:** A licensed clinician, definitive diagnostic service,
+prescriber, dosage engine, or substitute for examination and medical review.
 
 **Core constraint (immutable — same policy weight as §19.6):**
-> The Health Companion Agent **NEVER** gives medical advice, diagnoses, or treatment recommendations. Every response that touches clinical data must include a disclaimer and defer to the user's doctor. The agent answers strictly in the frame of *"general wellness guidance informed by your data."*
+> The Health Companion Agent never states a definitive diagnosis, prescribes, or
+> provides dosages. It must still answer useful clinical questions using documented
+> findings, a hedged differential, supporting and conflicting evidence, missing
+> information, red flags, and a specific next clinical step.
 
 ---
 
@@ -2058,13 +2083,19 @@ UPDATE saved_prep_cards        c SET profile_id = (SELECT id FROM profiles WHERE
     "profile": {
       "display_name": "string",
       "date_of_birth": "YYYY-MM-DD or null",
-      "relation": "self | spouse | child | parent | sibling | other"
+      "relation": "supported family relationship",
+      "age": "computed integer or null",
+      "sex": "string or null",
+      "aliases": ["alternate record names"]
     },
     "health_memory": "compact profile-specific longitudinal memory (§19.7)",
-    "extracted_health_values": "last 90 days for selected profile, maximum 15",
-    "document_findings": "selected profile, abnormal/recent first, maximum 10",
-    "past_prep_cards": "last 3 for selected profile, summary only",
-    "conversation_history": "last 10 messages in the current conversation"
+    "extracted_health_values": "selected profile, abnormal/recent first, maximum 30",
+    "document_findings": "selected profile, abnormal/recent first, maximum 25",
+    "past_prep_cards": "last 8 for selected profile, summary only",
+    "conversation_history": "last 10 messages in the current conversation",
+    "recent_user_health_statements": "bounded cross-conversation user statements",
+    "family_profiles": "compact family summaries; detailed memory for explicitly referenced relatives",
+    "family_risk_considerations": "relationship- and subject-aware screening discussion seeds"
   }
 }
 ```
@@ -2073,12 +2104,21 @@ UPDATE saved_prep_cards        c SET profile_id = (SELECT id FROM profiles WHERE
 - Ground every answer in the user's actual data when relevant
 - Use longitudinal memory to recognize changes, recurrence, contradictions, and
   evidence-supported contextual patterns
-- Permitted scope: diet, lifestyle, daily schedule, wellness habits, understanding test results in general terms, when to follow up with a doctor
-- Guardrail: if the question asks for diagnosis, prescription, or "am I okay" reassurance → decline using the template in §24.6
-- Every assistant response must end with: *"This is general wellness information — not medical advice. Please discuss with your doctor."*
+- Permitted scope includes records explanation, longitudinal synthesis, family
+  history, lifestyle, doctor preparation, and educational differential reasoning.
+- Diagnosis-intent questions must not receive a stock refusal. The response
+  separates documented findings, plausible possibilities, evidence for/against,
+  unknowns, red flags, and specific follow-up.
+- Medication and dosage requests remain restricted to explaining what a clinician
+  or pharmacist must assess.
+- The interface renders one restrained disclaimer separately. Generated reply text
+  must not repeat boilerplate disclaimer copy.
 - Never say "you are fine", "you don't need to worry", or any equivalent reassurance about clinical status
 - Never present correlation as causation. Unusual observations require at least
   three comparable episodes and must say coincidence is possible.
+- If the model emits a generic diagnostic refusal or falsely claims no records are
+  available, the backend retries with a constrained differential contract and
+  falls back to available evidence deterministically.
 
 ---
 

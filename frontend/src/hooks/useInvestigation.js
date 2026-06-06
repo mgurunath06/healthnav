@@ -28,6 +28,12 @@ export function useInvestigation() {
         investigation_depth: isSignedIn ? store.investigationDepth : 2,
         follow_up_history: followUpHistory,
         screening_context: store.apiResponse?.screening_context ?? null,
+        profile_id: isSignedIn ? store.selectedProfileId || null : null,
+        client_context: {
+          local_date: new Date().toLocaleDateString('en-CA'),
+          season: seasonForMonth(new Date().getMonth()),
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        },
       }
 
       const res = await fetch(`${API_BASE}/investigate`, {
@@ -75,4 +81,11 @@ export function useInvestigation() {
   }
 
   return { investigate, submitAnswer, reset: store.reset }
+}
+
+function seasonForMonth(month) {
+  if (month >= 2 && month <= 4) return 'spring'
+  if (month >= 5 && month <= 7) return 'summer'
+  if (month >= 8 && month <= 10) return 'autumn'
+  return 'winter'
 }

@@ -82,13 +82,13 @@ export default function ChatScreen() {
     <div className="app-canvas min-h-dvh bg-warm-charcoal flex flex-col">
       <Header />
       <main className="flex-1 min-h-0 grid md:grid-cols-[16rem_1fr]">
-        <aside className="border-b md:border-b-0 md:border-r border-warm-border p-5 space-y-5 overflow-y-auto bg-warm-surface/35">
+        <aside className="border-b md:border-b-0 md:border-r border-warm-border p-5 space-y-5 overflow-y-auto bg-warm-surface">
           <Link to="/dashboard" className="editorial-link font-sans text-sm text-warm-muted hover:text-warm-off-white">
             Dashboard
           </Link>
           <button
             onClick={() => { setConversationId(null); setMessages([]) }}
-            className="w-full px-4 py-3 rounded-full bg-accent text-warm-charcoal font-sans text-sm font-semibold transition-colors hover:bg-marigold"
+            className="w-full px-4 py-3 rounded-full bg-warm-off-white text-warm-surface font-sans text-sm font-semibold transition-all duration-500 hover:-translate-y-0.5 hover:bg-accent"
           >
             New chat
           </button>
@@ -111,7 +111,7 @@ export default function ChatScreen() {
         </aside>
 
         <section className="min-h-0 flex flex-col">
-          <div className="border-b border-warm-border p-4">
+          <div className="border-b border-warm-border bg-warm-surface p-4">
             <div className="max-w-3xl mx-auto">
               <ProfileSelector value={profileId} onChange={setProfileId} />
             </div>
@@ -162,8 +162,8 @@ function MessageBlock({ message }) {
   const assistant = message.role === 'assistant'
   return (
     <div className={`flex ${assistant ? 'justify-start' : 'justify-end'} animate-fade-in-up`}>
-      <div className={`max-w-[85%] px-5 py-4 ${assistant ? 'border-l-2 border-plum' : 'rounded-2xl bg-accent text-warm-charcoal'}`}>
-        <p className={`${assistant ? 'font-serif text-lg text-warm-off-white' : 'font-sans text-sm text-warm-charcoal'} leading-relaxed whitespace-pre-wrap`}>
+      <div className={`max-w-[85%] px-5 py-4 shadow-matte ${assistant ? 'border-l-2 border-plum bg-warm-surface' : 'rounded-2xl bg-warm-elevated text-warm-off-white'}`}>
+        <p className={`${assistant ? 'font-serif text-lg text-warm-off-white' : 'font-sans text-sm text-warm-off-white'} leading-relaxed whitespace-pre-wrap`}>
           {message.content}
         </p>
         {message.disclaimer_shown && (

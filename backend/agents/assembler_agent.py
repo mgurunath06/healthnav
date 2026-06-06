@@ -119,6 +119,7 @@ class AssemblerInput(BaseModel):
     deep_dive_output: DeepDiveOutput | None
     lifestyle_output: LifestyleOutput | None = None
     agents_run: list[str]
+    personal_context: dict | None = None
 
 
 class AssemblerOutput(BaseModel):
@@ -268,6 +269,13 @@ class AssemblerAgent:
             f"Card detail instruction: {_DEPTH_CARD_GUIDANCE[inp.investigation_depth]}",
         ]
         sections.append(f"Agents run: {', '.join(inp.agents_run)}")
+        if inp.personal_context and inp.personal_context.get("summary"):
+            sections.append(
+                "Relevant personal health memory (context only; do not diagnose from it):\n"
+                + inp.personal_context["summary"]
+                + "\nCurrent setting: "
+                + str(inp.personal_context.get("current_context") or {})
+            )
 
         if inp.triage_output:
             sections.append(

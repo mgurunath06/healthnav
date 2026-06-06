@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from auth import verify_clerk_token
 from db.client import get_pool
+from db.health_memory import get_health_memory
 from db.users import ensure_user
 
 router = APIRouter(tags=["profiles"])
@@ -164,6 +165,41 @@ async def delete_profile(
     return {"deleted": True, "profile_id": profile_id}
 
 
+@router.get("/{profile_id}/memory")
+async def view_profile_memory(
+    profile_id: str,
+    clerk_user_id: str = Depends(verify_clerk_token),
+) -> dict:
+    pool = await get_pool()
+    if pool is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    profile_uuid = _parse_uuid(profile_id)
+    async with pool.acquire() as conn:
+        user_id = await ensure_user(conn, clerk_user_id)
+        await _assert_profile_owner(conn, profile_uuid, user_id)
+        return await get_health_memory(conn, user_id, profile_uuid)
+
+
+@router.delete("/{profile_id}/memory")
+async def clear_profile_memory(
+    profile_id: str,
+    clerk_user_id: str = Depends(verify_clerk_token),
+) -> dict:
+    pool = await get_pool()
+    if pool is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    profile_uuid = _parse_uuid(profile_id)
+    async with pool.acquire() as conn:
+        user_id = await ensure_user(conn, clerk_user_id)
+        await _assert_profile_owner(conn, profile_uuid, user_id)
+        await conn.execute(
+            "DELETE FROM profile_health_memory WHERE user_id = $1 AND profile_id = $2",
+            user_id,
+            profile_uuid,
+        )
+    return {"cleared": True, "profile_id": profile_id}
+
+
 async def _ensure_self_profile(conn, user_id: str) -> None:
     existing = await conn.fetchrow(
         "SELECT id FROM profiles WHERE user_id = $1 AND COALESCE(relation, relationship) = 'self'",
@@ -178,6 +214,16 @@ async def _ensure_self_profile(conn, user_id: str) -> None:
         """,
         user_id,
     )
+
+
+async def _assert_profile_owner(conn, profile_id, user_id: str) -> None:
+    row = await conn.fetchrow(
+        "SELECT id FROM profiles WHERE id = $1 AND user_id = $2",
+        profile_id,
+        user_id,
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="NOT_FOUND")
 
 
 def _profile(row) -> Profile:

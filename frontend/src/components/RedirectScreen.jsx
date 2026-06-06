@@ -25,7 +25,7 @@ export default function RedirectScreen() {
             onClick={reset}
             className="
               px-8 py-3 rounded-lg
-              bg-accent text-warm-off-white
+              bg-accent text-warm-surface
               font-sans font-medium text-base
               hover:bg-accent-hover transition-colors duration-250
               focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-warm-charcoal

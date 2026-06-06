@@ -19,7 +19,9 @@ export default function ProfileSelector({ value, onChange, includeAll = false })
         setProfiles(rows)
         const storageKey = user?.id ? `healthnav:selected_profile:${user.id}` : null
         const saved = storageKey ? localStorage.getItem(storageKey) : null
-        const next = value ?? saved ?? (includeAll ? '' : rows[0]?.id ?? '')
+        const next = includeAll
+          ? (value ?? saved ?? '')
+          : (value || saved || rows[0]?.id || '')
         if (next !== value) onChange?.(next)
       } catch {
         if (active) setProfiles([])

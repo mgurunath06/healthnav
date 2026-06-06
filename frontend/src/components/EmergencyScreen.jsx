@@ -13,31 +13,31 @@ export default function EmergencyScreen() {
       <div className="w-full max-w-lg">
 
         {/* Overline */}
-        <p className="font-mono text-xs text-warm-off-white/60 tracking-widest uppercase mb-6">
+        <p className="font-mono text-xs text-[#fff8ef]/65 tracking-widest uppercase mb-6">
           Emergency Advisory
         </p>
 
         {/* Headline */}
-        <h1 className="font-serif text-3xl font-light text-warm-off-white leading-snug mb-4">
+        <h1 className="font-serif text-3xl font-light text-[#fff8ef] leading-snug mb-4">
           Your symptoms may require immediate attention.
         </h1>
 
         {/* Advisory */}
-        <p className="font-sans text-base text-warm-off-white/80 leading-relaxed mb-8">
+        <p className="font-sans text-base text-[#fff8ef]/85 leading-relaxed mb-8">
           {advisory}
         </p>
 
         {/* Red flags */}
         {redFlags.length > 0 && (
-          <div className="mb-8 border border-warm-off-white/20 rounded-lg p-5">
-            <p className="font-mono text-xs text-warm-off-white/50 tracking-widest uppercase mb-3">
+          <div className="mb-8 border border-[#fff8ef]/25 rounded-lg p-5">
+            <p className="font-mono text-xs text-[#fff8ef]/60 tracking-widest uppercase mb-3">
               Indicators detected
             </p>
             <ul className="space-y-2">
               {redFlags.map((flag, i) => (
                 <li key={i} className="flex gap-2.5">
-                  <span className="mt-1.5 w-1 h-1 rounded-full bg-warm-off-white/50 shrink-0" />
-                  <span className="font-sans text-sm text-warm-off-white/80 leading-snug">{flag}</span>
+                  <span className="mt-1.5 w-1 h-1 rounded-full bg-[#fff8ef]/60 shrink-0" />
+                  <span className="font-sans text-sm text-[#fff8ef]/85 leading-snug">{flag}</span>
                 </li>
               ))}
             </ul>
@@ -48,16 +48,16 @@ export default function EmergencyScreen() {
         <a
           href="tel:112"
           className="block w-full text-center py-4 rounded-lg
-                     bg-warm-charcoal text-warm-off-white
+                     bg-[#29241f] text-[#fff8ef]
                      font-sans font-semibold text-base
                      hover:opacity-90 transition-opacity duration-250
-                     focus:outline-none focus-visible:ring-2 focus-visible:ring-warm-off-white focus-visible:ring-offset-2 focus-visible:ring-offset-quadrant-q1"
+                     focus:outline-none focus-visible:ring-2 focus-visible:ring-[#fff8ef] focus-visible:ring-offset-2 focus-visible:ring-offset-quadrant-q1"
         >
           Call Emergency Services
         </a>
 
         {/* Disclaimer */}
-        <p className="mt-6 font-sans text-xs text-warm-off-white/50 text-center leading-relaxed">
+        <p className="mt-6 font-sans text-xs text-[#fff8ef]/60 text-center leading-relaxed">
           This tool is not a substitute for professional emergency care. If you are unsure, call emergency services immediately.
         </p>
 
@@ -65,7 +65,7 @@ export default function EmergencyScreen() {
         <div className="mt-8 text-center">
           <button
             onClick={reset}
-            className="font-sans text-sm text-warm-off-white/50 hover:text-warm-off-white transition-colors duration-250"
+            className="font-sans text-sm text-[#fff8ef]/60 hover:text-[#fff8ef] transition-colors duration-250"
           >
             I&apos;m safe — start a new investigation
           </button>

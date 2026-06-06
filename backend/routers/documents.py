@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from agents.document_agent import DocumentAgent, ExtractionResult
 from auth import verify_clerk_token
 from db.client import get_pool
+from db.health_memory import merge_health_memory
 from db.users import ensure_user
 
 logger = logging.getLogger(__name__)
@@ -244,6 +245,31 @@ async def upload_document(
                                 for f in result.findings
                             ],
                         )
+                notable_results = [
+                    " ".join(
+                        part for part in (
+                            v.name,
+                            str(v.value),
+                            v.unit,
+                            "(outside reference range)" if v.is_abnormal else None,
+                        ) if part
+                    )
+                    for v in result.numeric_values
+                    if v.is_abnormal
+                ]
+                notable_results.extend(
+                    finding.finding
+                    for finding in result.findings
+                    if finding.is_abnormal
+                )
+                await merge_health_memory(
+                    conn,
+                    db_user_id,
+                    db_profile_id,
+                    durable_facts=result.conditions_mentioned,
+                    notable_results=notable_results,
+                    source="document",
+                )
 
     return UploadResponse(
         upload_id=str(log_id),

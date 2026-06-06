@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,6 +11,7 @@ from pydantic import BaseModel, Field
 from agents.openrouter_client import AgentFailure, OpenRouterClient
 from auth import verify_clerk_token
 from db.client import get_pool
+from db.health_memory import get_health_memory, merge_health_memory
 from db.users import ensure_user
 
 router = APIRouter(tags=["chat"])
@@ -46,6 +48,20 @@ async def post_chat(
 
     async with pool.acquire() as conn:
         user_id = await ensure_user(conn, clerk_user_id)
+        if profile_uuid is None and conversation_uuid is None:
+            profile_uuid = await conn.fetchval(
+                """
+                SELECT id
+                FROM profiles
+                WHERE user_id = $1
+                ORDER BY CASE
+                  WHEN COALESCE(relation, relationship) = 'self' THEN 0
+                  ELSE 1
+                END, created_at ASC
+                LIMIT 1
+                """,
+                user_id,
+            )
         if profile_uuid is not None:
             await _assert_profile_owner(conn, profile_uuid, user_id)
         if conversation_uuid is None:
@@ -69,7 +85,14 @@ async def post_chat(
             )
             if row is None:
                 raise HTTPException(status_code=404, detail="NOT_FOUND")
-            profile_uuid = row["profile_id"] if profile_uuid is None else profile_uuid
+            if row["profile_id"] is not None:
+                profile_uuid = row["profile_id"]
+            elif profile_uuid is not None:
+                await conn.execute(
+                    "UPDATE chat_conversations SET profile_id = $2 WHERE id = $1",
+                    conversation_uuid,
+                    profile_uuid,
+                )
 
         context = await _build_context(conn, user_id, profile_uuid)
         history = await conn.fetch(
@@ -83,9 +106,14 @@ async def post_chat(
             conversation_uuid,
         )
 
-    reply, sources = await _generate_reply(body.message, context, list(reversed(history)))
-    disclaimer_shown = any(source in sources for source in ("health_values", "document_findings", "prep_cards"))
-    if disclaimer_shown and _DISCLAIMER not in reply:
+    reply, sources, memory_updates = await _generate_reply(
+        body.message,
+        context,
+        list(reversed(history)),
+    )
+    memory_updates = _ground_memory_updates(memory_updates, body.message)
+    disclaimer_shown = True
+    if _DISCLAIMER not in reply:
         reply = f"{reply.rstrip()}\n\n{_DISCLAIMER}"
 
     async with pool.acquire() as conn:
@@ -112,6 +140,16 @@ async def post_chat(
                 "UPDATE chat_conversations SET updated_at = NOW() WHERE id = $1",
                 conversation_uuid,
             )
+            if any(memory_updates.values()):
+                await merge_health_memory(
+                    conn,
+                    user_id,
+                    profile_uuid,
+                    durable_facts=memory_updates["durable_facts"],
+                    recurring_concerns=memory_updates["recurring_concerns"],
+                    recent_episodes=memory_updates["recent_episodes"],
+                    source="chat",
+                )
 
     return ChatResponse(
         conversation_id=str(conversation_uuid),
@@ -275,8 +313,10 @@ async def _build_context(conn, user_id: str, profile_id: uuid.UUID | None) -> di
         user_id,
         profile_id,
     )
+    memory = await get_health_memory(conn, user_id, profile_id)
     return {
         "profile": dict(profile) if profile else None,
+        "health_memory": memory,
         "extracted_health_values": [dict(v) for v in values],
         "document_findings": [dict(f) for f in findings],
         "past_prep_cards": [
@@ -290,15 +330,32 @@ async def _build_context(conn, user_id: str, profile_id: uuid.UUID | None) -> di
     }
 
 
-async def _generate_reply(message: str, context: dict, history: list) -> tuple[str, list[str]]:
+async def _generate_reply(
+    message: str,
+    context: dict,
+    history: list,
+) -> tuple[str, list[str], dict[str, list[str]]]:
     prompt = (
-        "You are HealthNav's premium health companion. You provide general wellness "
-        "guidance informed by the user's records. Never diagnose, prescribe, provide "
-        "dosages, treatment plans, or clinical reassurance. If asked for diagnosis, "
-        "medication advice, or whether they are okay, redirect to their doctor and "
-        "offer useful questions or data points to discuss.\n\n"
+        "You are HealthNav's clinically informed health companion. Respond with the "
+        "clarity and structured questioning of a careful medical professional, while "
+        "being explicit that you are not a clinician and cannot diagnose. Use the "
+        "profile's longitudinal memory and records in every relevant response. Never "
+        "diagnose, prescribe, provide dosages, treatment plans, or clinical reassurance. "
+        "If asked for diagnosis, medication advice, or whether they are okay, redirect "
+        "to a licensed clinician and offer useful questions or data points to discuss.\n\n"
+        "You may surface longitudinal observations only when supported by repeated, dated "
+        "evidence. State the count and relevant dates, seasons, locations, or other context. "
+        "For unusual candidate correlations such as lunar phase, require at least 3 similar "
+        "episodes and explicitly say that coincidence is possible and no causal relationship "
+        "is established. Use language such "
+        "as 'I notice' or 'this may be a pattern worth discussing', never causal claims "
+        "such as a city being bad for the person's body. Do not treat a pattern as a diagnosis.\n\n"
+        "Memory updates must contain only facts explicitly stated by the user or present "
+        "in supplied records. Never store your own inference, diagnosis, or advice.\n\n"
         "Return only JSON with this schema: "
-        '{"reply":"string","sources_used":["health_values|document_findings|prep_cards|general_knowledge"]}.\n\n'
+        '{"reply":"string","sources_used":["health_memory|health_values|document_findings|prep_cards|general_knowledge"],'
+        '"memory_updates":{"durable_facts":["string"],"recurring_concerns":["string"],'
+        '"recent_episodes":["string"]}}.\n\n'
         f"User health context:\n{json.dumps(context, default=str)}"
     )
     messages = [{"role": "system", "content": prompt}]
@@ -309,14 +366,14 @@ async def _generate_reply(message: str, context: dict, history: list) -> tuple[s
         data = await _client.chat(role="companion", messages=messages, temperature=0.3)
     except AgentFailure as exc:
         logger.warning("Companion model failure: %s", exc.code)
-        return (_fallback_reply(message, context), ["general_knowledge"])
+        return (_fallback_reply(message, context), ["general_knowledge"], _empty_memory_updates())
     except Exception:
         logger.exception("Unexpected companion generation failure")
-        return (_fallback_reply(message, context), ["general_knowledge"])
+        return (_fallback_reply(message, context), ["general_knowledge"], _empty_memory_updates())
 
     if not isinstance(data, dict):
         logger.warning("Companion returned a non-object JSON response")
-        return (_fallback_reply(message, context), ["general_knowledge"])
+        return (_fallback_reply(message, context), ["general_knowledge"], _empty_memory_updates())
 
     reply = str(data.get("reply") or "").strip()
     sources = _normalise_sources(data.get("sources_used"))
@@ -324,16 +381,67 @@ async def _generate_reply(message: str, context: dict, history: list) -> tuple[s
         return (
             _fallback_reply(message, context),
             ["general_knowledge"],
+            _empty_memory_updates(),
         )
-    return reply, sources
+    return reply, sources, _normalise_memory_updates(data.get("memory_updates"))
 
 
 def _normalise_sources(value) -> list[str]:
-    allowed = {"health_values", "document_findings", "prep_cards", "general_knowledge"}
+    allowed = {"health_memory", "health_values", "document_findings", "prep_cards", "general_knowledge"}
     if not isinstance(value, list):
         return ["general_knowledge"]
     sources = [str(source) for source in value if str(source) in allowed]
     return sources or ["general_knowledge"]
+
+
+def _normalise_memory_updates(value) -> dict[str, list[str]]:
+    result = _empty_memory_updates()
+    if not isinstance(value, dict):
+        return result
+    for key in result:
+        rows = value.get(key)
+        if isinstance(rows, list):
+            result[key] = [
+                " ".join(str(item).split())[:500]
+                for item in rows[:8]
+                if str(item).strip()
+            ]
+    return result
+
+
+def _empty_memory_updates() -> dict[str, list[str]]:
+    return {
+        "durable_facts": [],
+        "recurring_concerns": [],
+        "recent_episodes": [],
+    }
+
+
+def _ground_memory_updates(
+    updates: dict[str, list[str]],
+    user_message: str,
+) -> dict[str, list[str]]:
+    source_tokens = _meaningful_tokens(user_message)
+    grounded = _empty_memory_updates()
+    for key, rows in updates.items():
+        for row in rows:
+            row_tokens = _meaningful_tokens(row)
+            required = 1 if len(row_tokens) <= 3 else 2
+            if len(source_tokens.intersection(row_tokens)) >= required:
+                grounded[key].append(row)
+    return grounded
+
+
+def _meaningful_tokens(value: str) -> set[str]:
+    ignored = {
+        "about", "after", "before", "been", "from", "have", "having",
+        "this", "that", "with", "were", "when", "where", "which", "your",
+    }
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", value.casefold())
+        if len(token) >= 3 and token not in ignored
+    }
 
 
 def _fallback_reply(message: str, context: dict) -> str:

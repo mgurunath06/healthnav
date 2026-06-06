@@ -15,7 +15,7 @@ export default function Header({ showReset = false }) {
   const showTimer = active && screen !== 'input'
 
   return (
-    <header className="relative z-20 w-full shrink-0 border-b border-warm-border/70 bg-warm-charcoal/90 px-4 py-4 sm:px-7">
+    <header className="relative z-20 w-full shrink-0 border-b border-warm-border/70 bg-warm-surface px-4 py-4 sm:px-7">
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-5">
         <button
           onClick={() => navigate(isSignedIn ? '/dashboard' : '/')}

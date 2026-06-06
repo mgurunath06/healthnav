@@ -4,69 +4,69 @@ import Header from '../components/Header'
 
 const clerkAppearance = {
   variables: {
-    colorPrimary:                 '#EE704B',
-    colorPrimaryHover:            '#E7AE49',
-    colorBackground:              '#211B16',
-    colorInputBackground:         '#2B231C',
-    colorInputText:               '#F7F0E5',
-    colorText:                    '#F7F0E5',
-    colorTextSecondary:           '#AD9F90',
-    colorTextOnPrimaryBackground: '#17130F',
-    colorNeutral:                 '#45392E',
+    colorPrimary:                 '#B95538',
+    colorPrimaryHover:            '#98442D',
+    colorBackground:              '#FFFAF2',
+    colorInputBackground:         '#F2EDE4',
+    colorInputText:               '#29241F',
+    colorText:                    '#29241F',
+    colorTextSecondary:           '#756D64',
+    colorTextOnPrimaryBackground: '#FFFAF2',
+    colorNeutral:                 '#D0C5B7',
     borderRadius:                 '1rem',
     fontFamily:                   "'Inter', 'DM Sans', system-ui, sans-serif",
     fontSize:                     '15px',
   },
   elements: {
     card: {
-      background:   '#211B16',
-      border:       '1px solid #45392E',
-      boxShadow:    '0 4px 20px -2px rgba(26, 24, 20, 0.4)',
+      background:   '#FFFAF2',
+      border:       '1px solid #D0C5B7',
+      boxShadow:    '0 26px 70px -42px rgba(71, 54, 39, 0.38)',
     },
     headerTitle: {
       fontFamily: "'Fraunces', 'Playfair Display', Georgia, serif",
       fontWeight: '300',
-      color:      '#F7F0E5',
+      color:      '#29241F',
     },
     headerSubtitle: {
-      color: '#AD9F90',
+      color: '#756D64',
     },
     dividerLine: {
-      background: '#45392E',
+      background: '#D0C5B7',
     },
     dividerText: {
-      color: '#AD9F90',
+      color: '#756D64',
     },
     socialButtonsBlockButton: {
-      background:  '#2B231C',
-      border:      '1px solid #45392E',
-      color:       '#F7F0E5',
+      background:  '#F2EDE4',
+      border:      '1px solid #D0C5B7',
+      color:       '#29241F',
     },
     socialButtonsBlockButtonText: {
-      color: '#F7F0E5',
+      color: '#29241F',
     },
     formFieldLabel: {
-      color: '#AD9F90',
+      color: '#756D64',
     },
     formFieldInput: {
-      background:  '#2B231C',
-      border:      '1px solid #45392E',
-      color:       '#F7F0E5',
+      background:  '#F2EDE4',
+      border:      '1px solid #D0C5B7',
+      color:       '#29241F',
     },
     formButtonPrimary: {
-      background:    '#EE704B',
-      color:         '#17130F',
+      background:    '#B95538',
+      color:         '#FFFAF2',
       fontFamily:    "'Inter', 'DM Sans', system-ui, sans-serif",
       letterSpacing: '0',
     },
     footerActionLink: {
-      color: '#EE704B',
+      color: '#B95538',
     },
     identityPreviewText: {
-      color: '#F7F0E5',
+      color: '#29241F',
     },
     identityPreviewEditButton: {
-      color: '#AD9F90',
+      color: '#756D64',
     },
   },
 }

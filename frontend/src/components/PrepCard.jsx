@@ -26,6 +26,7 @@ export default function PrepCard() {
   const requestId = useInvestigationStore((s) => s.requestId)
   const symptomDescription = useInvestigationStore((s) => s.symptomDescription)
   const investigationDepth = useInvestigationStore((s) => s.investigationDepth)
+  const selectedProfileId = useInvestigationStore((s) => s.selectedProfileId)
   const { reset } = useInvestigation()
   const { getToken } = useAuth()
   const { isSignedIn } = useUser()
@@ -50,7 +51,7 @@ export default function PrepCard() {
     setSharing(true)
     try {
       const canvas = await html2canvas(cardRef.current, {
-        backgroundColor: '#242018',
+        backgroundColor: '#FFFAF2',
         scale: 2,
         useCORS: true,
       })
@@ -89,6 +90,7 @@ export default function PrepCard() {
           request_id: requestId,
           symptom_description: symptomDescription,
           prep_card: card,
+          profile_id: selectedProfileId || null,
         }),
       })
       setSaved(true)

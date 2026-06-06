@@ -46,7 +46,7 @@ export default function PremiumDashboard() {
     <div className="app-canvas min-h-dvh bg-warm-charcoal">
       <Header />
       <main className="mx-auto w-full max-w-7xl px-5 py-10 sm:px-8 lg:py-14">
-        <section className="grid items-end gap-8 border-b border-warm-border/70 pb-10 lg:grid-cols-[1fr_auto]">
+        <section className="animate-fade-in-up grid items-end gap-8 border-b border-warm-border/70 pb-10 lg:grid-cols-[1fr_auto]">
           <div>
             <p className="eyebrow">Your health desk</p>
             <h1 className="mt-4 font-serif text-4xl font-light tracking-[-0.04em] text-warm-off-white sm:text-6xl">
@@ -58,14 +58,14 @@ export default function PremiumDashboard() {
           </div>
           <Link
             to="/"
-            className="group flex min-w-72 items-center justify-between rounded-full bg-accent px-6 py-4 font-sans text-sm font-semibold text-warm-charcoal transition-colors hover:bg-marigold"
+            className="group flex min-w-72 items-center justify-between rounded-full bg-warm-off-white px-6 py-4 font-sans text-sm font-semibold text-warm-surface transition-all duration-500 hover:-translate-y-1 hover:bg-accent"
           >
             Start an investigation
             <ArrowRight size={18} className="transition-transform group-hover:translate-x-1" />
           </Link>
         </section>
 
-        <section className="mt-8 grid gap-5 md:grid-cols-3">
+        <section className="animate-fade-in-up-2 mt-8 grid gap-5 md:grid-cols-3">
           <ActionTile
             to="/"
             icon={<NotePencil size={25} weight="light" />}
@@ -92,7 +92,7 @@ export default function PremiumDashboard() {
           />
         </section>
 
-        <section className="mt-12 grid gap-10 lg:grid-cols-2">
+        <section className="animate-fade-in-up-3 mt-12 grid gap-10 lg:grid-cols-2">
           <Collection
             label="Recent doctor briefs"
             empty="Your completed briefs will collect here."
@@ -119,19 +119,24 @@ export default function PremiumDashboard() {
 
 function ActionTile({ to, icon, index, title, body, tone }) {
   const tones = {
-    accent: 'bg-accent text-warm-charcoal',
-    plum: 'bg-plum text-warm-off-white',
-    marigold: 'bg-marigold text-warm-charcoal',
+    accent: { accent: '#b95538', icon: 'text-accent' },
+    plum: { accent: '#76556c', icon: 'text-plum' },
+    marigold: { accent: '#b47a1d', icon: 'text-marigold' },
   }
+  const palette = tones[tone]
   return (
-    <Link to={to} className={`group min-h-60 rounded-[1.75rem] p-6 transition-transform duration-500 hover:-translate-y-1 ${tones[tone]}`}>
+    <Link
+      to={to}
+      style={{ '--tile-accent': palette.accent }}
+      className="premium-action group min-h-60 rounded-[1.75rem] p-6 text-warm-off-white"
+    >
       <div className="flex items-start justify-between">
-        <span>{icon}</span>
-        <span className="font-mono text-xs opacity-65">{index}</span>
+        <span className={palette.icon}>{icon}</span>
+        <span className="font-mono text-xs text-warm-muted">{index}</span>
       </div>
       <div className="mt-16">
         <h2 className="font-serif text-2xl leading-tight">{title}</h2>
-        <p className="mt-3 max-w-xs font-sans text-sm leading-6 opacity-75">{body}</p>
+        <p className="mt-3 max-w-xs font-sans text-sm leading-6 text-warm-muted">{body}</p>
       </div>
     </Link>
   )

@@ -55,6 +55,14 @@ class InvestigationDepthTests(TestCase):
         self.assertIsNotNone(question)
         self.assertEqual(question.id, "fallback_frequency")
 
+    def test_personal_memory_produces_personalised_fallback(self) -> None:
+        question = _fallback_followup_question(
+            [],
+            {"summary": "Recent investigations: recurring headaches after poor sleep"},
+        )
+        self.assertIsNotNone(question)
+        self.assertEqual(question.id, "fallback_personal_change")
+
     def test_structured_answers_can_reuse_screening(self) -> None:
         history = [{"question_type": "scale", "answer": "7"}]
         self.assertTrue(_last_answer_was_selection(history))

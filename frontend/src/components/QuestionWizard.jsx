@@ -230,7 +230,7 @@ function YesNo({ value, onChange }) {
         <button key={val} onClick={() => onChange(val)}
           className={`flex-1 py-4 rounded-lg font-sans font-medium text-base border transition-colors duration-250
             focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-warm-charcoal
-            ${value === val ? 'bg-accent border-accent text-warm-off-white' : 'bg-warm-surface border-warm-border text-warm-off-white hover:border-accent'}`}
+            ${value === val ? 'bg-accent border-accent text-warm-surface' : 'bg-warm-surface border-warm-border text-warm-off-white hover:border-accent'}`}
         >{label}</button>
       ))}
     </div>

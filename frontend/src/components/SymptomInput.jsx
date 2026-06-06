@@ -13,6 +13,7 @@ import {
 import { useInvestigation } from '../hooks/useInvestigation'
 import { useInvestigationStore } from '../store/useInvestigationStore'
 import Header from './Header'
+import ProfileSelector from './ProfileSelector'
 
 const MIN_CHARS = 10
 const MAX_CHARS = 2000
@@ -32,6 +33,8 @@ export default function SymptomInput() {
   const [showPaceNotice, setShowPaceNotice] = useState(false)
   const investigationDepth = useInvestigationStore((s) => s.investigationDepth)
   const setInvestigationDepth = useInvestigationStore((s) => s.setInvestigationDepth)
+  const selectedProfileId = useInvestigationStore((s) => s.selectedProfileId)
+  const setSelectedProfileId = useInvestigationStore((s) => s.setSelectedProfileId)
   const { investigate } = useInvestigation()
   const canSubmit = text.trim().length >= MIN_CHARS
 
@@ -67,7 +70,12 @@ export default function SymptomInput() {
       <Header />
 
       {isSignedIn ? (
-        <MemberWorkspace user={user} editor={editor} />
+        <MemberWorkspace
+          user={user}
+          editor={editor}
+          profileId={selectedProfileId}
+          onProfileChange={setSelectedProfileId}
+        />
       ) : (
         <GuestLanding editor={editor} />
       )}
@@ -117,12 +125,12 @@ function GuestLanding({ editor }) {
   )
 }
 
-function MemberWorkspace({ user, editor }) {
+function MemberWorkspace({ user, editor, profileId, onProfileChange }) {
   const name = user?.firstName || 'there'
 
   return (
-    <main className="mx-auto grid w-full max-w-[90rem] flex-1 gap-0 px-5 py-8 sm:px-8 lg:grid-cols-[15rem_minmax(0,1fr)_18rem] lg:py-10">
-      <aside className="animate-fade-in-up border-b border-warm-border/70 pb-7 lg:border-b-0 lg:border-r lg:pb-0 lg:pr-7">
+    <main className="mx-auto grid w-full max-w-[90rem] flex-1 gap-6 px-5 py-8 sm:px-8 lg:grid-cols-[15rem_minmax(0,1fr)_18rem] lg:py-10">
+      <aside className="animate-fade-in-up rounded-[1.75rem] border border-warm-border/70 bg-warm-surface p-6 shadow-matte">
         <p className="eyebrow">Personal workspace</p>
         <h1 className="mt-4 font-serif text-3xl font-light leading-tight text-warm-off-white">
           Good to see you, {name}.
@@ -130,6 +138,9 @@ function MemberWorkspace({ user, editor }) {
         <p className="mt-3 text-sm leading-6 text-warm-muted">
           Your records and past briefs can now inform a more useful conversation.
         </p>
+        <div className="mt-7">
+          <ProfileSelector value={profileId} onChange={onProfileChange} />
+        </div>
 
         <nav className="mt-8 grid grid-cols-2 gap-2 lg:grid-cols-1" aria-label="Health workspace">
           <WorkspaceLink to="/dashboard" icon={<FolderOpen size={18} />} label="Health desk" />
@@ -138,7 +149,7 @@ function MemberWorkspace({ user, editor }) {
         </nav>
       </aside>
 
-      <section className="animate-fade-in-up-2 py-8 lg:px-10 lg:py-0">
+      <section className="animate-fade-in-up-2 py-3 lg:px-3 lg:py-0">
         <div className="mb-7 flex flex-col justify-between gap-4 border-b border-warm-border/70 pb-6 sm:flex-row sm:items-end">
           <div>
             <p className="eyebrow">New investigation</p>
@@ -153,7 +164,7 @@ function MemberWorkspace({ user, editor }) {
         {editor}
       </section>
 
-      <aside className="animate-fade-in-up-3 border-t border-warm-border/70 pt-7 lg:border-l lg:border-t-0 lg:pl-7 lg:pt-0">
+      <aside className="animate-fade-in-up-3 rounded-[1.75rem] border border-warm-border/70 bg-warm-surface p-6 shadow-matte">
         <p className="eyebrow">Available to this brief</p>
         <div className="mt-5 space-y-6">
           <ContextRow index="01" title="Saved history" body="Past doctor briefs stay available in your health desk." />
@@ -189,7 +200,7 @@ function InvestigationEditor({
 
   return (
     <form onSubmit={onSubmit} className="editorial-panel relative overflow-hidden rounded-[2rem]">
-      <div className="absolute left-0 top-0 h-1 w-2/5 bg-accent" />
+      <div className="editorial-rule-in absolute left-0 top-0 h-[3px] w-2/5 bg-accent" />
       <div className="border-b border-warm-border/70 px-6 py-5 sm:px-8">
         <div className="flex items-center justify-between gap-4">
           <div>
@@ -285,7 +296,7 @@ function PaceDial({ value, selectedOption, onChange }) {
         <span className="font-mono text-[11px] text-warm-muted">LEVEL {value} / 5</span>
       </div>
 
-      <div className="mt-4 overflow-hidden rounded-2xl border border-warm-border bg-warm-charcoal/35">
+      <div className="mt-4 overflow-hidden rounded-2xl border border-warm-border bg-parchment">
         <div className="grid items-center gap-2 px-5 pt-5 sm:grid-cols-[minmax(15rem,0.9fr)_1fr] sm:px-7">
           <div className="relative mx-auto w-full max-w-[17rem]" aria-hidden="true">
             <svg viewBox="0 0 240 145" className="w-full overflow-visible">

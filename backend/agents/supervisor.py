@@ -42,6 +42,7 @@ class Supervisor:
         investigation_depth: int = 3,
         follow_up_history: list[dict] | None = None,
         screening_context: dict | None = None,
+        personal_context: dict | None = None,
     ) -> dict:
         follow_up_history = follow_up_history or []
         trace: list[dict] = []
@@ -127,6 +128,7 @@ class Supervisor:
             investigation_depth,
             max_followups,
             follow_up_history,
+            personal_context,
             trace,
         )
         minimum_followups = _FOLLOWUP_MINIMUMS.get(investigation_depth, 2)
@@ -145,7 +147,10 @@ class Supervisor:
                 deduped = _dedup_questions(deep_dive.followup_questions, follow_up_history)
                 filtered = _filter_saturated_topics(deduped, follow_up_history)
                 if below_minimum and not filtered:
-                    fallback = _fallback_followup_question(follow_up_history)
+                    fallback = _fallback_followup_question(
+                        follow_up_history,
+                        personal_context,
+                    )
                     filtered = [fallback] if fallback is not None else []
                 if filtered:
                     return self._needs_followup(
@@ -160,7 +165,7 @@ class Supervisor:
         lifestyle: LifestyleOutput | None = None
         if deep_dive is not None and self.should_run_lifestyle(triage, deep_dive):
             lifestyle = await self._run_lifestyle(
-                request_id, symptom_description, deep_dive, trace
+                request_id, symptom_description, deep_dive, personal_context, trace
             )
             # Lifestyle may also request follow-up (spec §7.1 path 8)
             if lifestyle is not None and lifestyle.needs_followup and len(follow_up_history) < _MAX_FOLLOWUP:
@@ -181,7 +186,7 @@ class Supervisor:
         ]
         assembler_out = await self._run_assembler(
             request_id, symptom_description, triage, red_flag,
-            deep_dive, lifestyle, investigation_depth, agents_run, trace,
+            deep_dive, lifestyle, investigation_depth, agents_run, personal_context, trace,
         )
         if assembler_out is None:
             # Assembler failed → error with raw outputs (spec §7.3)
@@ -444,6 +449,7 @@ class Supervisor:
         investigation_depth: int,
         max_followups: int,
         follow_up_history: list[dict],
+        personal_context: dict | None,
         trace: list[dict],
     ) -> DeepDiveOutput | None:
         started = _iso_now()
@@ -459,6 +465,7 @@ class Supervisor:
                     max_followups=max_followups,
                     minimum_followups=_FOLLOWUP_MINIMUMS.get(investigation_depth, 2),
                     follow_up_history=follow_up_history,
+                    personal_context=personal_context,
                 )
             )
             dur = _ms() - t
@@ -491,6 +498,7 @@ class Supervisor:
         request_id: str,
         symptom_description: str,
         deep_dive: DeepDiveOutput,
+        personal_context: dict | None,
         trace: list[dict],
     ) -> LifestyleOutput | None:
         started = _iso_now()
@@ -501,6 +509,7 @@ class Supervisor:
                 LifestyleInput(
                     symptom_description=symptom_description,
                     deep_dive_findings=deep_dive.structured_findings,
+                    personal_context=personal_context,
                 )
             )
             dur = _ms() - t
@@ -541,6 +550,7 @@ class Supervisor:
         lifestyle: LifestyleOutput | None,
         investigation_depth: int,
         agents_run: list[str],
+        personal_context: dict | None,
         trace: list[dict],
     ) -> AssemblerOutput | None:
         started = _iso_now()
@@ -556,6 +566,7 @@ class Supervisor:
                     deep_dive_output=deep_dive,
                     lifestyle_output=lifestyle,
                     agents_run=agents_run,
+                    personal_context=personal_context,
                 )
             )
             dur = _ms() - t
@@ -799,9 +810,31 @@ def _findings_sufficient(
 
 def _fallback_followup_question(
     follow_up_history: list[dict],
+    personal_context: dict | None = None,
 ) -> FollowUpQuestion | None:
     """Return a useful unanswered dimension when the model stops before the depth minimum."""
     asked = " ".join(item.get("question_text", "").lower() for item in follow_up_history)
+    memory = (personal_context or {}).get("summary", "").strip()
+    if memory and not any(
+        keyword in asked
+        for keyword in ("previous", "before", "last time", "similar episode", "pattern")
+    ):
+        return FollowUpQuestion(
+            id="fallback_personal_change",
+            question=(
+                "Compared with your previous similar health episodes, does anything feel "
+                "meaningfully different this time?"
+            ),
+            type="single_choice",
+            choices=[
+                FollowUpChoice(value="more_intense", label="More intense"),
+                FollowUpChoice(value="less_intense", label="Less intense"),
+                FollowUpChoice(value="different_symptoms", label="Different symptoms"),
+                FollowUpChoice(value="similar", label="Mostly similar"),
+                FollowUpChoice(value="not_sure", label="Not sure"),
+            ],
+            allow_other_text=True,
+        )
     candidates = [
         (
             ("severe", "severity", "scale", "rate"),

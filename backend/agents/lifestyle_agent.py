@@ -111,6 +111,7 @@ class LifestyleFactors(BaseModel):
 class LifestyleInput(BaseModel):
     symptom_description: str
     deep_dive_findings: StructuredFindings
+    personal_context: dict | None = None
 
 
 class LifestyleOutput(BaseModel):
@@ -130,6 +131,7 @@ class LifestyleAgent:
         user_content = (
             f"Symptom description: {inp.symptom_description}\n\n"
             f"Clinical findings from deep-dive:\n{findings_json}"
+            f"{_personal_context_section(inp.personal_context)}"
         )
 
         messages = [
@@ -141,3 +143,17 @@ class LifestyleAgent:
             return LifestyleOutput.model_validate(data)
         except ValidationError as exc:
             raise AgentFailure("MALFORMED_JSON") from exc
+
+
+def _personal_context_section(context: dict | None) -> str:
+    if not context or not context.get("summary"):
+        return ""
+    return (
+        "\n\nRelevant personal health memory:\n"
+        f"{context['summary']}\n"
+        f"Current setting: {context.get('current_context') or {}}\n"
+        "Mention a possible pattern only when repeated dated episodes support it. Require at least "
+        "three similar episodes for unusual correlations such as lunar phase and explicitly note that "
+        "coincidence is possible. State the count and phrase it as something to discuss with a licensed "
+        "clinician, never as a diagnosis or causal claim."
+    )

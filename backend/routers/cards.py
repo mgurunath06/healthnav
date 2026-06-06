@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from auth import verify_clerk_token
 from db.client import get_pool
+from db.health_memory import merge_health_memory
 from db.users import ensure_user
 
 router = APIRouter(tags=["cards"])
@@ -60,6 +61,15 @@ async def save_card(
             body.request_id,
             body.symptom_description,
             json.dumps(body.prep_card),
+        )
+        summary = body.prep_card.get("summary") if isinstance(body.prep_card, dict) else None
+        await merge_health_memory(
+            conn,
+            user_id,
+            profile_uuid,
+            recurring_concerns=[body.symptom_description] if body.symptom_description else [],
+            recent_episodes=[summary] if summary else [],
+            source="saved_card",
         )
     return _card(row, None, detail=True)
 

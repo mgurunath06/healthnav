@@ -63,6 +63,17 @@ Respond ONLY with a valid JSON object — no markdown fences, no text outside th
 - Every question must be a DIRECT consequence of what was just answered. Ask what the answer made you curious about. Do not ask generic, template questions.
   BAD: "How long have you had this symptom?" (generic)
   GOOD: "You said the pain is constant — does it wake you up at night, or is it only while you're awake?" (follows from the previous answer)
+- When personal health memory is supplied, each question must first account for what is already known about this person.
+  Prefer one of these personalised question strategies:
+  1. CHANGE: ask how the current episode differs from a previous similar episode.
+  2. RECURRENCE: ask whether a previously observed trigger, season, place, routine, or accompanying symptom is present now.
+  3. CONTRADICTION: clarify when the current report differs from the stored history.
+  4. GAP: ask the most important unknown that neither the current conversation nor memory answers.
+- Briefly anchor a personalised question in the known context, for example:
+  "Your last two headache episodes followed poor sleep. How was your sleep in the two nights before this started?"
+  "Your earlier reports were mainly in summer. Did this episode begin after similar heat, pollen, travel, or indoor cooling exposure?"
+- Never ask a question merely to mention history. The historical detail must be clinically relevant to preparing the doctor conversation.
+- Do not repeat a stored fact as a question unless checking whether it has changed.
 - Never ask about anything already covered in the conversation history.
 - Choose the question type that fits the question naturally:
   yes_no → strictly true/false binary ("does it wake you at night?", "have you tried painkillers?"). Both answers must be literally Yes or No.
@@ -139,6 +150,7 @@ class DeepDiveInput(BaseModel):
     max_followups: int = 4
     minimum_followups: int = 2
     follow_up_history: list[FollowUpQA] = []
+    personal_context: dict | None = None
 
 
 class DeepDiveOutput(BaseModel):
@@ -174,6 +186,7 @@ class DeepDiveAgent:
             f"Minimum follow-up exchanges: {inp.minimum_followups}\n"
             f"Maximum follow-up exchanges: {inp.max_followups}\n"
             f"Depth guidance: {_DEPTH_GUIDANCE[inp.investigation_depth]}"
+            f"{_personal_context_section(inp.personal_context)}"
             f"{history_section}"
         )
 
@@ -187,3 +200,19 @@ class DeepDiveAgent:
             return DeepDiveOutput.model_validate(data)
         except ValidationError as exc:
             raise AgentFailure("MALFORMED_JSON") from exc
+
+
+def _personal_context_section(context: dict | None) -> str:
+    if not context or not context.get("summary"):
+        return ""
+    return (
+        "\n\nRelevant personal health memory (historical context, not a diagnosis):\n"
+        f"{context['summary']}\n"
+        f"Current setting: {context.get('current_context') or {}}\n"
+        "Use this to avoid repeated questions and ask about meaningful changes or recurring patterns. "
+        "The next question should be explicitly personalised when the memory contains relevant context. "
+        "Do not assume an old concern explains the current symptom. Mention common temporal or "
+        "location patterns only when at least two dated episodes support them. Require at least "
+        "three similar episodes for unusual correlations such as lunar phase, state the evidence "
+        "count, and say coincidence is possible."
+    )

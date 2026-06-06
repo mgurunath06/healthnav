@@ -1,6 +1,6 @@
 # UI/UX Design Specification: HealthNav Frontend
 
-**Document Version:** 1.2.0
+**Document Version:** 1.3.0
 **Project:** HealthNav — Symptom Investigation & Doctor Prep Assistant
 **Stack:** React (Vite), Tailwind CSS, Zustand, Custom Hooks (FastAPI Backend)
 
@@ -50,27 +50,31 @@ These colors appear as flat matte fields, never neon gradients or glows.
 
 All UI elements must utilize this specific token system. Blue-tinted blacks and cool greys are strictly prohibited.
 
-### 2.1 Dark Mode (Default)
+### 2.1 Light Mode (Default): "Warm Paper"
 | Role | Color Name | Hex Code | Usage |
 | :--- | :--- | :--- | :--- |
-| **Background** | Warm Charcoal | `#1A1814` | App background, primary wrapper |
-| **Surface** | Warm Dark Stone | `#242018` | Cards, inputs, main containers |
-| **Elevated** | Warm Medium Stone | `#2E2A24` | Hover states, secondary cards, skeletons |
-| **Border** | Warm Grey | `#3D3830` | Dividers, quiet borders (1px) |
-| **Text Primary** | Warm Off-White | `#F0EBE3` | Headings, primary body copy |
-| **Text Muted** | Warm Muted | `#9A9080` | Helper text, secondary labels, disabled text |
-| **Accent Primary** | Burnt Sienna | `#C4622D` | Primary CTAs, active states, focus rings |
-| **Accent Hover** | Deeper Sienna | `#A8501F` | Hover state for primary CTAs |
+| **Background** | Warm Mineral | `#F2EDE4` | App background, primary wrapper |
+| **Surface** | Soft Parchment | `#FFFAF2` | Cards, inputs, main containers |
+| **Elevated** | Warm Putty | `#E9E1D5` | Hover states, secondary rows, skeletons |
+| **Border** | Warm Linen | `#D0C5B7` | Dividers, quiet borders (1px) |
+| **Text Primary** | Editorial Ink | `#29241F` | Headings, primary body copy |
+| **Text Muted** | Warm Graphite | `#756D64` | Helper text, secondary labels, disabled text |
+| **Accent Primary** | Burnt Sienna | `#B95538` | Primary CTAs, active states, focus rings |
+| **Accent Hover** | Deep Sienna | `#98442D` | Hover state for primary CTAs |
+
+Dark charcoal is reserved for high-contrast anchors and emergency CTAs. It must
+not dominate ordinary signed-in screens. Accent colors should usually appear as
+rules, icons, progress, or small fields rather than full-card backgrounds.
 
 ### 2.2 Semantic / Triage Quadrants
 *Text contrast for quadrants must strictly follow the rules below to pass WCAG AA.*
 
 | Role | Color Name | Hex Code | Text Contrast Pair |
 | :--- | :--- | :--- | :--- |
-| **Q1 (Emergency)**| Deep Terracotta | `#B84C3A` | `text-warm-off-white` |
+| **Q1 (Emergency)**| Deep Terracotta | `#B84C3A` | explicit warm cream `#FFF8EF` |
 | **Q2 (Warning)** | Warm Amber | `#C49A3C` | `text-warm-charcoal` |
-| **Q3 (Success)** | Sage Green | `#6B8F71` | `text-warm-off-white` |
-| **Q4 (Neutral)** | Warm Stone | `#7A7060` | `text-warm-off-white` |
+| **Q3 (Success)** | Sage Green | `#6B8F71` | explicit warm cream `#FFF8EF` |
+| **Q4 (Neutral)** | Warm Stone | `#7A7060` | explicit warm cream `#FFF8EF` |
 
 ---
 
@@ -103,16 +107,46 @@ The typographic hierarchy mimics a premium printed publication.
 * **State Changes:** 250ms crossfade for background/border colors. A maximum
   4px lift may be used on large dashboard action fields; no popping or bounce.
 * **Loading States:** Static blocks colored `bg-warm-elevated` with a slow, subtle opacity shift (opacity 0.6 to 0.8) over 2-3 seconds. **No spinners.**
+* **Ambient motion:** The app canvas may contain one extremely slow matte color
+  field drift (15-20 seconds). It must remain low contrast and stop under
+  `prefers-reduced-motion`.
+* **Section choreography:** Major dashboard/workspace sections reveal in a
+  100-150ms stagger using opacity, a maximum 24px vertical movement, and a subtle
+  `0.985 -> 1` scale settle.
+* **Editorial rules:** Accent lines may draw from left to right on entry.
+* **Hover behavior:** Premium action surfaces may lift up to 4px while their
+  colored side rule expands slightly. No bounce, spring, glow, or parallax.
 
 ---
 
 ## 5. Screen Specifications
 
 ### Screen 1: Symptom Input (`<SymptomInput />`)
-* **Layout:** Centered, focused view.
+* **Authentication-aware layout:** The root route must wait for Clerk session
+  restoration before choosing a layout. Never flash the anonymous screen to a
+  returning signed-in user.
+* **Anonymous layout:** Centered editorial landing composition with product
+  explanation beside the symptom editor.
+* **Signed-in layout:** A clearly different three-zone health workspace:
+    * Left rail: greeting, active profile selector, Health Desk, document upload,
+      and HealthNav companion navigation.
+    * Center: the new investigation editor as the primary task.
+    * Right rail: available personal context and a direct document-upload action.
+* **Profile context:** Every signed-in investigation is attached to one explicit
+  profile. Family profiles must never be visually or contextually mixed.
 * **Input:** Single large, breathing `textarea` on a `bg-warm-surface`.
 * **Interaction:** Focus state shifts border to Burnt Sienna over 300ms. Disable default browser focus rings (`focus:ring-0`).
 * **Validation:** Minimum 10 characters to enable the "Investigate" CTA.
+* **Anonymous investigation depth:** Fixed at level 2 ("Focused", up to one
+  clarifying question). Do not render a selectable five-level control. A compact
+  locked row may show the current depth. Selecting "Change pace" reveals inline
+  copy explaining that adjustable depth requires sign-in/subscription.
+* **Signed-in investigation depth:** Render a restrained clinical-depth dial,
+  not five generic equal buttons. The control uses:
+    * A matte semicircular gauge with a Marigold needle and Coral progress arc.
+    * A native `range` input for keyboard and assistive-technology support.
+    * Labels from Quick through Comprehensive.
+    * A clear question budget and statement that safety screening is unchanged.
 * **Footer:** Muted trust signals ("Your data stays private", "Not a diagnosis tool").
 
 ### Screen 2: Follow-up Question Wizard (`<QuestionWizard />`)
@@ -124,6 +158,12 @@ The typographic hierarchy mimics a premium printed publication.
     * `multi_choice`: List rows. Selected state turns `bg-warm-elevated` with a Sienna checkmark.
     * `scale`: 1-10 custom slider. Sienna thumb, warm track. Large serif number display.
 * **Navigation:** "Continue" primary button. "Back" is always a muted text link, never a button.
+* **Personalized question copy:** For signed-in users, questions should naturally
+  reference relevant known context when it changes what should be asked:
+  "Your previous headache episodes followed poor sleep. How was your sleep before
+  this began?" Avoid repeatedly announcing that the system has memory.
+* **No generic repetition:** Do not ask for a fact already present in the active
+  profile memory unless checking whether it has changed.
 
 ### Screen 3: Doctor Prep Card (`<PrepCard />`)
 * **Layout:** Designed to look like a printable medical brief. White/Parchment background (if light mode) or elevated surface container.
@@ -160,6 +200,31 @@ The typographic hierarchy mimics a premium printed publication.
 * **CTAs:** * **Primary:** "Retry Connection" (uses `bg-warm-elevated` to distinguish from a standard continuation action).
     * **Secondary:** "Return to Start" (text link with muted underline).
 
+### Screen 8: Signed-in Health Workspace
+* **Purpose:** Make the authenticated product feel like a persistent personal
+  health desk, not the anonymous landing page with extra buttons.
+* **Information hierarchy:** New investigation remains central. Records, chat,
+  profile context, and uploads are visible as supporting tools rather than cards
+  competing for equal attention.
+* **Memory language:** Use calm phrases such as "Based on your history", "I
+  notice", or "This may be a pattern worth discussing." Never use diagnostic or
+  deterministic claims such as "Delhi does not suit your body."
+* **Pattern evidence:** When showing an observation, include the evidence count
+  and relevant dates, seasons, or places. Unusual correlations must explicitly
+  acknowledge that coincidence is possible.
+
+### Screen 9: Health Companion (`<ChatScreen />`)
+* **Layout:** Editorial conversation view with ruled text blocks; no bubble-heavy
+  messenger aesthetic.
+* **Persistent profile:** A conversation is permanently scoped to one profile.
+  Changing the global profile must not silently reassign an existing thread.
+* **Personalized responses:** Relevant longitudinal memory, recent records, and
+  the current conversation inform every answer.
+* **Disclaimer:** Every assistant response ends with a muted medical-care
+  disclaimer. The disclaimer must not overpower the useful response.
+* **Memory controls:** Profile/settings surfaces must provide a readable summary
+  of what HealthNav remembers and a clear destructive action to reset it.
+
 ---
 
 ## 6. Architecture & State Management
@@ -167,3 +232,9 @@ The typographic hierarchy mimics a premium printed publication.
 * **State Machine:** Managed globally via `Zustand`. The app operates on a strictly linear state machine: `input` -> `wizard` -> `prep_card` | `emergency` | `redirect` | `error` | `loading`.
 * **Data Fetching:** A custom React hook (`useInvestigation()`) handles the `POST /investigate` calls to the FastAPI backend and dispatches state updates to Zustand based on the response payload.
 * **Decoupling:** UI components must remain "dumb." They receive props (questions, choices) and emit events (`onNext`, `onBack`), while Zustand + the Hook handle the business logic and orchestration.
+* **Authenticated state:** Zustand also holds the active `selectedProfileId` and
+  investigation depth. Authenticated requests send the Clerk bearer token,
+  profile ID, local date, season, and timezone.
+* **Longitudinal memory:** The frontend never assembles medical memory itself.
+  It selects the profile; the backend retrieves and updates the compact,
+  profile-specific health memory.

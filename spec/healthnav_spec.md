@@ -5,6 +5,13 @@
 > **Source of truth:** This document. Code must conform. If reality forces a change, update this doc *first*, then code.
 
 ### Changelog
+- **v2.5** — Longitudinal profile memory and authenticated interaction redesign.
+  Anonymous investigation depth is fixed at level 2; signed-in users receive a
+  dedicated profile-aware workspace and clinical depth dial. NavChat and symptom
+  investigation now share compact profile memory updated from documents, chats,
+  saved cards, and completed investigations. Follow-up questions must use
+  relevant history; candidate temporal/location/context patterns use evidence
+  thresholds and non-causal language. Memory inspection and reset APIs added.
 - **v2.4** — Cost-aware routing: combined screening replaces three initial LLM calls; structured follow-up answers reuse the initial screening result; investigation depth controls model tier; per-role output-token ceilings and OpenRouter usage telemetry added; chat context and follow-up budgets reduced.
 - **v2.3** — §24 (requested as §22): Health Companion Chat added (Sprint 8 scope). Premium only. Gemini Flash 2.0 (`companion` role). Grounded in user health data. Clinical boundary guardrails mandatory. §22 was already occupied by v2 Implementation Notes — new section placed as §24.
 - **v2.2** — §19.4: enriched extraction schema — `document_meta`, `findings`, `conclusions`, `reporting_doctor`, `hospital_or_lab`, `patient_name` added to extraction output. `document_findings` table added. `document_upload_logs` extended with reporting/referring doctor, hospital, patient name, and document subtype columns. `extracted_health_values` gains `profile_id` FK. §23: Family Profiles added (Sprint 8 scope) — `profiles` table, profile CRUD API, document upload with profile selection, name-match UX, migration 003.
@@ -1350,23 +1357,29 @@ const PrivateRoute = ({ children }) => {
 ### 19.1 Architecture overview
 
 ```
-[User opens app — logged in]
-  → Dashboard Service pulls:
-      ├─ Last 3 saved cards (recency)
-      ├─ Extracted health values (document pipeline)
-      ├─ User conditions (declared + inferred)
-      ├─ Weather API call (if nudge_weather = true)
-      └─ Reminder engine output
-  → Renders personalised <PremiumDashboard />
+[Documents, completed investigations, saved cards, and companion chat]
+  → Extract only explicit user facts and record facts
+  → Merge into profile_health_memory
+  → Store compact summary + structured lists + recent contextual episodes
+  → Raw records remain the source of truth
 
-[User starts investigation — logged in]
-  → auth_token present on POST /investigate
-  → Backend: embed current symptom_description
-  → pgvector: retrieve top-3 semantically similar past cards (same user_id)
-  → Inject retrieved context into Deep-Dive + Lifestyle agent prompts
-  → Investigation proceeds with personalised question generation
-  → Quadrant scoring remains deterministic (no history weighting — §19.6)
+[User starts any signed-in interaction]
+  → Verify Clerk identity and selected profile ownership
+  → Load the compact profile memory
+  → Add current date, weekday, season, timezone, configured location,
+    and other available context
+  → Inject into Deep-Dive, Lifestyle, Assembler, or Companion
+  → Ask and answer using relevant personal history
+  → Update memory after the interaction
+
+[Clinical safety path]
+  → Guardrail, Triage, Red Flag, and deterministic quadrant scoring use
+    the current complaint only
 ```
+
+The compact memory is the normal low-token path. Agents may read detailed raw
+documents, cards, or messages when the compact memory is insufficient or the
+user requests exact detail.
 
 ### 19.2 Personalised dashboard (`<PremiumDashboard />`)
 
@@ -1396,37 +1409,29 @@ If no history: `"Welcome to HealthNav. Start your first investigation below."`
 
 ### 19.3 Context injection into investigation agents
 
-**Triggered when:** `auth_token` present + `allow_investigation_context = true` + at least 1 past card exists.
-
-**Retrieval:**
-```python
-# Embed current symptom
-current_embedding = embed(symptom_description)  # text-embedding-3-small
-
-# Retrieve top-3 similar past cards for this user
-past_context = pgvector_query(
-    user_id=user.id,
-    embedding=current_embedding,
-    top_k=3,
-    min_similarity=0.75   # ignore weak matches
-)
-```
+**Triggered when:** A valid bearer token is present and a profile can be resolved.
+The request must use the selected profile; if absent, the backend resolves the
+account holder's `self` profile. Account-wide family memory must never be used.
 
 **Context object passed to agents:**
 ```json
 {
-  "user_context": {
-    "known_conditions": ["Diabetes", "Hypertension"],
-    "past_similar_investigations": [
-      {
-        "date": "2025-11-14",
-        "primary_symptom": "headache",
-        "duration": "3 days",
-        "quadrant": "Q3",
-        "key_findings": ["worse in evenings", "screen time related"]
-      }
+  "profile_health_memory": {
+    "summary": "compact natural-language context",
+    "durable_facts": ["explicit user or record facts only"],
+    "recurring_concerns": ["repeated symptom descriptions"],
+    "notable_results": ["recorded abnormal values/findings"],
+    "recent_episodes": [
+      "[date=2026-06-06; weekday=Saturday; season=summer; location=Delhi, India; lunar_phase=waning_gibbous] recurring headache"
     ],
-    "investigation_count": 7
+    "source_counts": {"document": 2, "investigation": 4, "chat": 3}
+  },
+  "current_context": {
+    "local_date": "2026-06-06",
+    "season": "summer",
+    "timezone": "Asia/Calcutta",
+    "location_city": "Delhi",
+    "location_country": "India"
   }
 }
 ```
@@ -1436,10 +1441,29 @@ past_context = pgvector_query(
 | Agent | Context use |
 |---|---|
 | Deep-Dive | Generates follow-up questions referencing past patterns: "Last time you had headaches, screen time was a factor — has that changed?" |
-| Lifestyle | Weights known conditions in lifestyle correlation |
+| Lifestyle | Compares current triggers/routines with relevant historical context and clearly labels candidate patterns |
 | Assembler | Adds "Personal context" section to Doctor Prep Card: "Note: You have a history of similar symptoms. Mention this pattern to your doctor." |
 | Guardrail / Triage / Red Flag | **Context not injected.** These must remain unbiased. |
 | Supervisor / Quadrant scoring | **Context not injected.** Deterministic layer stays clean (§19.6). |
+
+**Personalized-question requirement:**
+- Every follow-up first checks current answers and profile memory.
+- Prefer change, recurrence, contradiction, or genuinely missing information.
+- Do not ask a known fact again unless checking whether it changed.
+- Reference history only when it materially improves doctor preparation.
+- If the model stops before a required depth minimum, the deterministic fallback
+  asks how this episode differs from previous similar episodes before using a
+  generic clinical-dimension fallback.
+
+**Pattern evidence rules:**
+- Common contextual observations such as season, location, sleep, travel, or
+  routine require at least two comparable dated episodes.
+- Unusual candidate correlations such as lunar phase require at least three
+  similar episodes.
+- Always state the evidence count and relevant dates/context.
+- Use non-causal language: "I notice", "appears more often", "may be a pattern
+  worth discussing", and "coincidence is possible".
+- Never store an inferred diagnosis or causal claim in memory.
 
 ### 19.4 Document upload pipeline
 
@@ -1677,6 +1701,49 @@ Response (200):
 - Lifestyle correlation narrative
 
 **Rationale:** The clinical output (what action the user should take) must reflect only their current symptoms. History context enriches the conversation; it must not change the medical recommendation. This protects users from a pattern that skews them toward or away from seeking care.
+
+### 19.7 Profile health memory
+
+Migration: `006_profile_health_memory.sql`.
+
+```sql
+CREATE TABLE profile_health_memory (
+  user_id            TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  profile_id         UUID REFERENCES profiles(id) ON DELETE CASCADE,
+  summary            TEXT NOT NULL DEFAULT '',
+  durable_facts      JSONB NOT NULL DEFAULT '[]',
+  recurring_concerns JSONB NOT NULL DEFAULT '[]',
+  notable_results    JSONB NOT NULL DEFAULT '[]',
+  recent_episodes    JSONB NOT NULL DEFAULT '[]',
+  source_counts      JSONB NOT NULL DEFAULT '{}',
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+There is one memory row per `(user_id, profile_id)`, including a null-profile
+fallback row only for legacy data. New interactions must resolve a real profile.
+
+**Update sources:**
+
+| Source | Memory contribution |
+|---|---|
+| Document extraction | Explicit conditions mentioned and abnormal recorded results |
+| Completed investigation | Symptom concern and dated/contextual episode summary |
+| Saved prep card | Symptom concern and card summary |
+| Companion chat | Explicit user-stated durable facts, concerns, and episodes |
+
+Chat-proposed memory updates are normalized and must share meaningful terms with
+the user's actual message before persistence. Assistant interpretations,
+candidate correlations, advice, and diagnoses are not durable facts.
+
+**Token strategy:** Agents receive the compact summary by default. Detailed raw
+records are read only when exact values, source verification, or additional
+detail is needed.
+
+**Control APIs:**
+- `GET /profiles/{profile_id}/memory` returns the readable memory structure.
+- `DELETE /profiles/{profile_id}/memory` clears learned memory for that profile.
+- Both endpoints verify Clerk ownership.
 
 ---
 
@@ -1980,7 +2047,7 @@ UPDATE saved_prep_cards        c SET profile_id = (SELECT id FROM profiles WHERE
 
 **Model role:** `companion` (add to `model_config.py` — see §24.7)
 
-**Context injected at the start of every conversation:**
+**Context injected for every message:**
 ```json
 {
   "user_context": {
@@ -1989,20 +2056,25 @@ UPDATE saved_prep_cards        c SET profile_id = (SELECT id FROM profiles WHERE
       "date_of_birth": "YYYY-MM-DD or null",
       "relation": "self | spouse | child | parent | sibling | other"
     },
-    "extracted_health_values": "last 90 days, all profiles — [{value_name, value_raw, unit, reference_range, is_abnormal, recorded_date}]",
-    "document_findings": "all findings grouped by upload — [{upload_id, document_type, recorded_date, findings: [{section, finding, is_abnormal}]}]",
-    "past_prep_cards": "last 5, summary only — [{symptom_description, quadrant, date}]",
-    "conditions_mentioned": "aggregated from all documents — [string]"
+    "health_memory": "compact profile-specific longitudinal memory (§19.7)",
+    "extracted_health_values": "last 90 days for selected profile, maximum 15",
+    "document_findings": "selected profile, abnormal/recent first, maximum 10",
+    "past_prep_cards": "last 3 for selected profile, summary only",
+    "conversation_history": "last 10 messages in the current conversation"
   }
 }
 ```
 
 **System prompt core rules:**
 - Ground every answer in the user's actual data when relevant
+- Use longitudinal memory to recognize changes, recurrence, contradictions, and
+  evidence-supported contextual patterns
 - Permitted scope: diet, lifestyle, daily schedule, wellness habits, understanding test results in general terms, when to follow up with a doctor
 - Guardrail: if the question asks for diagnosis, prescription, or "am I okay" reassurance → decline using the template in §24.6
-- Every response that references clinical values must end with: *"This is general wellness information — not medical advice. Please discuss with your doctor."*
+- Every assistant response must end with: *"This is general wellness information — not medical advice. Please discuss with your doctor."*
 - Never say "you are fine", "you don't need to worry", or any equivalent reassurance about clinical status
+- Never present correlation as causation. Unusual observations require at least
+  three comparable episodes and must say coincidence is possible.
 
 ---
 
@@ -2025,7 +2097,7 @@ Response:
   "conversation_id": "UUID",
   "reply":           "string",
   "disclaimer_shown": true,
-  "sources_used":    ["health_values", "document_findings", "prep_cards", "general_knowledge"]
+  "sources_used":    ["health_memory", "health_values", "document_findings", "prep_cards", "general_knowledge"]
 }
 ```
 
@@ -2151,7 +2223,11 @@ Add to `backend/agents/model_config.py`:
 
 - **Access control:** A user can only read/write conversations where `chat_conversations.user_id = current_user_id`. Enforced at API layer.
 - **Profile scoping:** Context is built from the selected profile's data. If `profile_id = null`, uses the self profile.
-- **Conversation history window:** Maximum last 20 messages sent to the LLM as context. Older messages are stored in DB but not re-injected.
+- **Conversation history window:** Maximum last 10 messages sent to the LLM as context. Older messages remain stored; durable explicit facts are represented through profile memory.
+- **Profile permanence:** Once a conversation has a profile, it cannot silently
+  switch to another profile because the global selector changed.
+- **Learning:** A response may propose memory updates, but only explicit facts
+  grounded in the current user's words are persisted.
 - **Title generation:** Conversation title is auto-set from the first user message (first 80 characters, truncated with ellipsis). Not editable in v1.
 - **No cross-user data:** The context injection must only include data owned by `current_user_id`. This is enforced at the query level, not assumed from the client.
 - **Deletion is permanent:** Deleting a conversation cascades to all messages. No soft-delete in v1.

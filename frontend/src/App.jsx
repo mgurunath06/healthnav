@@ -16,7 +16,6 @@ import ProfileScreen from './components/ProfileScreen'
 import ChatScreen from './components/ChatScreen'
 import ProfileOnboardingGate from './components/ProfileOnboardingGate'
 import ProfileDetailScreen from './components/ProfileDetailScreen'
-import DesignDirections from './components/DesignDirections'
 import './App.css'
 
 function InvestigationFlow() {
@@ -54,7 +53,6 @@ export default function App() {
     <Routes>
       <Route path="/"                  element={<InvestigationFlow />} />
       <Route path="/login"             element={<LoginScreen />} />
-      <Route path="/design-directions" element={<DesignDirections />} />
       <Route path="/dashboard"         element={<PrivateRoute><PremiumDashboard /></PrivateRoute>} />
       <Route path="/dashboard/upload"  element={<PrivateRoute><DocumentUploadScreen /></PrivateRoute>} />
       <Route path="/profile"           element={<PrivateRoute><ProfileScreen /></PrivateRoute>} />

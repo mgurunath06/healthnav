@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth, useUser } from '@clerk/clerk-react'
 import { Link } from 'react-router-dom'
-import { ArrowRight, ChatCircleText, FileArrowUp, FolderOpen, NotePencil, UsersThree } from '@phosphor-icons/react'
+import { ArrowRight, ChatCircleText, FileArrowUp, NotePencil, UsersThree } from '@phosphor-icons/react'
 import Header from './Header'
 import { apiFetch } from '../lib/api'
 
@@ -11,6 +11,13 @@ function timeOfDay() {
   if (h < 17) return 'afternoon'
   return 'evening'
 }
+
+const EDITION = new Date().toLocaleDateString('en-GB', {
+  weekday: 'long',
+  day: '2-digit',
+  month: 'long',
+  year: 'numeric',
+})
 
 export default function PremiumDashboard() {
   const { getToken } = useAuth()
@@ -46,53 +53,69 @@ export default function PremiumDashboard() {
     <div className="app-canvas min-h-dvh bg-warm-charcoal">
       <Header />
       <main className="mx-auto w-full max-w-7xl px-5 py-10 sm:px-8 lg:py-14">
-        <section className="animate-fade-in-up grid items-end gap-8 border-b border-warm-border/70 pb-10 lg:grid-cols-[1fr_auto]">
-          <div>
-            <p className="eyebrow">Your health desk</p>
-            <h1 className="mt-4 font-serif text-4xl font-light tracking-[-0.04em] text-warm-off-white sm:text-6xl">
-              Good {timeOfDay()}{user?.firstName ? `, ${user.firstName}` : ''}.
-            </h1>
-            <p className="mt-4 max-w-xl text-base leading-7 text-warm-muted">
-              Keep your records, questions, and doctor briefs in one calm place.
-            </p>
+        {/* Masthead */}
+        <section className="animate-fade-in-up">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-warm-off-white pb-3 font-mono text-[11px] uppercase tracking-[0.2em] text-warm-muted">
+            <span>The Health Desk</span>
+            <span className="hidden sm:inline">{EDITION}</span>
+            <span>No. {String(cards.length + docs.length).padStart(3, '0')}</span>
           </div>
-          <Link
-            to="/"
-            className="group flex min-w-72 items-center justify-between rounded-full bg-warm-off-white px-6 py-4 font-sans text-sm font-semibold text-warm-surface transition-all duration-500 hover:-translate-y-1 hover:bg-accent"
-          >
-            Start an investigation
-            <ArrowRight size={18} className="transition-transform group-hover:translate-x-1" />
-          </Link>
+
+          <div className="grid items-end gap-8 border-b-2 border-warm-off-white py-7 lg:grid-cols-[1fr_auto]">
+            <div>
+              <p className="eyebrow">Daily edition · Personal health record</p>
+              <h1 className="mt-4 font-serif text-5xl font-light leading-[0.95] tracking-[-0.04em] text-warm-off-white sm:text-7xl">
+                Good {timeOfDay()}{user?.firstName ? `, ${user.firstName}` : ''}.
+              </h1>
+              <p className="mt-5 max-w-xl border-l-2 border-accent pl-4 font-serif text-lg italic leading-7 text-warm-muted">
+                Your records, questions, and doctor briefs &mdash; gathered in one calm, considered place.
+              </p>
+            </div>
+            <Link
+              to="/"
+              className="group flex min-w-72 items-center justify-between rounded-full bg-warm-off-white px-6 py-4 font-sans text-sm font-semibold text-warm-surface transition-all duration-500 hover:-translate-y-1 hover:bg-accent"
+            >
+              Start an investigation
+              <ArrowRight size={18} className="transition-transform group-hover:translate-x-1" />
+            </Link>
+          </div>
         </section>
 
-        <section className="animate-fade-in-up-2 mt-8 grid gap-5 md:grid-cols-2 lg:grid-cols-4">
-          <ActionTile
+        {/* Section header */}
+        <div className="animate-fade-in-up-2 mt-9 flex items-baseline justify-between border-b border-warm-border pb-2">
+          <p className="eyebrow">Today&apos;s desk</p>
+          <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-warm-muted">Four columns</span>
+        </div>
+
+        {/* Column rail of actions */}
+        <section className="animate-fade-in-up-2 mt-6 grid divide-warm-border border-warm-border md:grid-cols-2 md:divide-x lg:grid-cols-4">
+          <ActionColumn
             to="/"
-            icon={<NotePencil size={25} weight="light" />}
+            icon={<NotePencil size={22} weight="light" />}
             index="01"
             title="Prepare a doctor brief"
             body="Make sense of a new or changing symptom."
             tone="accent"
           />
-          <ActionTile
+          <ActionColumn
             to="/chat"
-            icon={<ChatCircleText size={25} weight="light" />}
+            icon={<ChatCircleText size={22} weight="light" />}
             index="02"
             title="Ask HealthNav"
             body="Explore your records and prepare useful questions."
             tone="plum"
           />
-          <ActionTile
+          <ActionColumn
             to="/dashboard/upload"
-            icon={<FileArrowUp size={25} weight="light" />}
+            icon={<FileArrowUp size={22} weight="light" />}
             index="03"
             title="Add a health document"
             body="Bring test results and reports into your history."
             tone="marigold"
           />
-          <ActionTile
+          <ActionColumn
             to="/profile"
-            icon={<UsersThree size={25} weight="light" />}
+            icon={<UsersThree size={22} weight="light" />}
             index="04"
             title="Family profiles"
             body="Maintain separate histories with shared family context."
@@ -100,8 +123,10 @@ export default function PremiumDashboard() {
           />
         </section>
 
-        <section className="animate-fade-in-up-3 mt-12 grid gap-10 lg:grid-cols-2">
-          <Collection
+        {/* Reading columns */}
+        <section className="animate-fade-in-up-3 mt-12 grid gap-x-12 gap-y-10 border-t-2 border-warm-off-white pt-8 lg:grid-cols-2 lg:divide-x lg:divide-warm-border">
+          <Column
+            kicker="Filed recently"
             label="Recent doctor briefs"
             empty="Your completed briefs will collect here."
             rows={cards.slice(0, 4).map((card) => ({
@@ -110,7 +135,9 @@ export default function PremiumDashboard() {
               meta: `${card.quadrant?.quadrant_label ?? 'Saved'} · ${formatDate(card.created_at)}`,
             }))}
           />
-          <Collection
+          <Column
+            className="lg:pl-12"
+            kicker="On record"
             label="Health documents"
             empty="Uploaded tests and reports will appear here."
             rows={docs.slice(0, 4).map((doc) => ({
@@ -125,9 +152,9 @@ export default function PremiumDashboard() {
   )
 }
 
-function ActionTile({ to, icon, index, title, body, tone }) {
+function ActionColumn({ to, icon, index, title, body, tone }) {
   const tones = {
-    accent: { accent: '#b95538', icon: 'text-accent' },
+    accent: { accent: '#667f60', icon: 'text-accent' },
     plum: { accent: '#76556c', icon: 'text-plum' },
     marigold: { accent: '#b47a1d', icon: 'text-marigold' },
     sage: { accent: '#667f60', icon: 'text-sage' },
@@ -137,38 +164,44 @@ function ActionTile({ to, icon, index, title, body, tone }) {
     <Link
       to={to}
       style={{ '--tile-accent': palette.accent }}
-      className="premium-action group min-h-60 rounded-[1.75rem] p-6 text-warm-off-white"
+      className="group flex min-h-52 flex-col justify-between px-0 py-6 transition-colors duration-300 md:px-6"
     >
-      <div className="flex items-start justify-between">
-        <span className={palette.icon}>{icon}</span>
+      <div className="flex items-baseline justify-between">
         <span className="font-mono text-xs text-warm-muted">{index}</span>
+        <span className={`${palette.icon} transition-transform duration-300 group-hover:-translate-y-0.5`}>{icon}</span>
       </div>
-      <div className="mt-16">
-        <h2 className="font-serif text-2xl leading-tight">{title}</h2>
-        <p className="mt-3 max-w-xs font-sans text-sm leading-6 text-warm-muted">{body}</p>
+      <div className="mt-10">
+        <h2 className="font-serif text-2xl leading-tight text-warm-off-white">{title}</h2>
+        <p className="mt-3 font-sans text-sm leading-6 text-warm-muted">{body}</p>
+        <span className="mt-4 inline-flex items-center gap-1 font-mono text-[11px] uppercase tracking-[0.18em] text-warm-muted transition-colors group-hover:text-accent">
+          Read more <ArrowRight size={13} className="transition-transform group-hover:translate-x-1" />
+        </span>
       </div>
     </Link>
   )
 }
 
-function Collection({ label, rows, empty }) {
+function Column({ kicker, label, rows, empty, className = '' }) {
   return (
-    <div>
-      <div className="mb-4 flex items-center justify-between">
-        <p className="eyebrow">{label}</p>
-        <FolderOpen size={18} className="text-warm-muted" />
-      </div>
-      <div className="border-t border-warm-border">
+    <div className={className}>
+      <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-accent">{kicker}</p>
+      <h3 className="mt-2 font-serif text-3xl font-light tracking-tight text-warm-off-white">{label}</h3>
+      <div className="mt-5 border-t border-warm-off-white">
         {rows.length === 0 ? (
-          <p className="border-b border-warm-border py-8 font-serif text-xl text-warm-muted">{empty}</p>
-        ) : rows.map((row) => (
-          <div key={row.id} className="group flex items-center justify-between gap-4 border-b border-warm-border py-5">
-            <div className="min-w-0">
-              <p className="truncate font-sans text-sm text-warm-off-white">{row.title}</p>
-              <p className="mt-1 font-mono text-[11px] text-warm-muted">{row.meta}</p>
+          <p className="border-b border-warm-border py-8 font-serif text-xl italic text-warm-muted">{empty}</p>
+        ) : rows.map((row, i) => (
+          <Link
+            key={row.id}
+            to="#"
+            className="group flex items-baseline gap-4 border-b border-warm-border py-5"
+          >
+            <span className="mt-0.5 font-mono text-xs text-warm-muted">{String(i + 1).padStart(2, '0')}</span>
+            <div className="min-w-0 flex-1">
+              <p className="font-serif text-lg leading-snug text-warm-off-white transition-colors group-hover:text-accent">{row.title}</p>
+              <p className="mt-1 font-mono text-[11px] uppercase tracking-wider text-warm-muted">{row.meta}</p>
             </div>
-            <ArrowRight size={16} className="shrink-0 text-warm-muted transition-transform group-hover:translate-x-1 group-hover:text-accent" />
-          </div>
+            <ArrowRight size={16} className="mt-1 shrink-0 text-warm-muted transition-transform group-hover:translate-x-1 group-hover:text-accent" />
+          </Link>
         ))}
       </div>
     </div>

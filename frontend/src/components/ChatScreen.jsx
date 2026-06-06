@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '@clerk/clerk-react'
 import Header from './Header'
+
+const LEGACY_DISCLAIMER = 'This is general wellness information - not medical advice. Please discuss with your doctor.'
 import ProfileSelector from './ProfileSelector'
 import { apiFetch } from '../lib/api'
 
@@ -160,20 +162,29 @@ export default function ChatScreen() {
 
 function MessageBlock({ message }) {
   const assistant = message.role === 'assistant'
+  const content = assistant ? stripLegacyDisclaimer(message.content) : message.content
   return (
     <div className={`flex ${assistant ? 'justify-start' : 'justify-end'} animate-fade-in-up`}>
       <div className={`max-w-[85%] px-5 py-4 shadow-matte ${assistant ? 'border-l-2 border-plum bg-warm-surface' : 'rounded-2xl bg-warm-elevated text-warm-off-white'}`}>
         <p className={`${assistant ? 'font-serif text-lg text-warm-off-white' : 'font-sans text-sm text-warm-off-white'} leading-relaxed whitespace-pre-wrap`}>
-          {message.content}
+          {content}
         </p>
         {message.disclaimer_shown && (
           <p className="font-sans text-xs text-warm-muted italic mt-3">
-            This is general wellness information - not medical advice. Please discuss with your doctor.
+            HealthNav provides clinical context, not a diagnosis. Confirm medical decisions with a licensed clinician.
           </p>
         )}
       </div>
     </div>
   )
+}
+
+function stripLegacyDisclaimer(value = '') {
+  let cleaned = value.trim()
+  while (cleaned.toLowerCase().endsWith(LEGACY_DISCLAIMER.toLowerCase())) {
+    cleaned = cleaned.slice(0, -LEGACY_DISCLAIMER.length).trim()
+  }
+  return cleaned
 }
 
 function formatDate(value) {

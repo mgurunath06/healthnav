@@ -111,10 +111,9 @@ async def post_chat(
         context,
         list(reversed(history)),
     )
+    reply = _strip_standard_disclaimer(reply)
     memory_updates = _ground_memory_updates(memory_updates, body.message)
     disclaimer_shown = True
-    if _DISCLAIMER not in reply:
-        reply = f"{reply.rstrip()}\n\n{_DISCLAIMER}"
 
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -337,12 +336,22 @@ async def _generate_reply(
 ) -> tuple[str, list[str], dict[str, list[str]]]:
     prompt = (
         "You are HealthNav's clinically informed health companion. Respond with the "
-        "clarity and structured questioning of a careful medical professional, while "
-        "being explicit that you are not a clinician and cannot diagnose. Use the "
+        "clarity and structured reasoning of a careful medical professional. Use the "
         "profile's longitudinal memory and records in every relevant response. Never "
         "diagnose, prescribe, provide dosages, treatment plans, or clinical reassurance. "
-        "If asked for diagnosis, medication advice, or whether they are okay, redirect "
-        "to a licensed clinician and offer useful questions or data points to discuss.\n\n"
+        "Do not begin with a refusal or a generic statement that you cannot diagnose. "
+        "The interface displays a medical disclaimer separately, so never repeat a "
+        "boilerplate disclaimer in the reply.\n\n"
+        "When asked what condition the person may have, provide a useful non-diagnostic "
+        "differential instead of refusing. Clearly separate: (1) the most plausible "
+        "possibilities, ranked only when the supplied evidence supports ranking; "
+        "(2) the specific personal history, symptoms, dates, and results supporting each; "
+        "(3) evidence that does not fit or information still needed; and (4) the appropriate "
+        "next clinical step and any urgent warning signs. Use language such as 'could be "
+        "consistent with', 'one possibility is', and 'this does not establish a diagnosis'. "
+        "If the records are insufficient, say exactly what is known and what would distinguish "
+        "the possibilities. For medication or dosage requests, do not provide instructions; "
+        "explain what a clinician or pharmacist needs to assess.\n\n"
         "You may surface longitudinal observations only when supported by repeated, dated "
         "evidence. State the count and relevant dates, seasons, locations, or other context. "
         "For unusual candidate correlations such as lunar phase, require at least 3 similar "
@@ -462,9 +471,21 @@ def _fallback_reply(message: str, context: dict) -> str:
         for key in ("extracted_health_values", "document_findings", "past_prep_cards")
     )
     if clinical_question:
+        evidence = _fallback_evidence(context)
+        if evidence:
+            return (
+                "I cannot identify one condition reliably from the available information, "
+                f"but the relevant evidence I have is: {evidence}. Several conditions can "
+                "produce overlapping symptoms, so this does not establish a diagnosis. "
+                "A clinician can narrow the possibilities using the symptom timeline, an "
+                "examination, and targeted tests. Tell me which symptom concerns you most "
+                "and when it began, and I can compare it with this history more precisely."
+            )
         return (
-            "That question is best answered by your doctor, who can evaluate you directly. "
-            "I can still help you organize your symptoms, recent results, and questions to discuss with them."
+            "There is not enough specific symptom or record evidence here to identify the "
+            "most plausible possibilities. Tell me the main symptom, when it began, what "
+            "makes it better or worse, and any associated symptoms. I can then outline a "
+            "non-diagnostic differential and the warning signs that need prompt medical care."
         )
     if has_records:
         return (
@@ -475,6 +496,36 @@ def _fallback_reply(message: str, context: dict) -> str:
         "I could not complete the full response just now. "
         "I can still help with general wellness routines or prepare questions for your doctor."
     )
+
+
+def _fallback_evidence(context: dict) -> str:
+    items: list[str] = []
+    memory = context.get("health_memory") or {}
+    summary = str(memory.get("summary") or "").strip()
+    if summary:
+        items.append(summary[:350])
+
+    for card in (context.get("past_prep_cards") or [])[:2]:
+        symptom = str(card.get("symptom_description") or "").strip()
+        date = str(card.get("date") or "").strip()
+        if symptom:
+            items.append(f"{symptom[:160]} ({date})" if date else symptom[:160])
+
+    for value in (context.get("extracted_health_values") or [])[:3]:
+        name = str(value.get("value_name") or "").strip()
+        raw = str(value.get("value_raw") or "").strip()
+        unit = str(value.get("unit") or "").strip()
+        if name and raw:
+            items.append(" ".join(part for part in (name, raw, unit) if part))
+
+    return "; ".join(items[:5])
+
+
+def _strip_standard_disclaimer(reply: str) -> str:
+    cleaned = reply.strip()
+    while cleaned.casefold().endswith(_DISCLAIMER.casefold()):
+        cleaned = cleaned[: -len(_DISCLAIMER)].rstrip()
+    return cleaned
 
 
 async def _assert_profile_owner(conn, profile_id: uuid.UUID, user_id: str) -> None:

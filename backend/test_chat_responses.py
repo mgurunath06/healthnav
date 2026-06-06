@@ -60,7 +60,21 @@ class ChatResponseTests(TestCase):
         self.assertTrue(
             _is_unhelpful_refusal(
                 "I cannot provide a diagnosis or tell you what ailments you have. "
-                "Please consult with a doctor or other qualified healthcare provider."
+                "Please consult with a doctor or other qualified healthcare provider.",
+            )
+        )
+
+    def test_rejects_false_claim_that_health_context_is_unavailable(self):
+        context = {
+            "health_memory": {"summary": "Recurring headaches during summer."},
+            "recent_user_health_statements": [],
+        }
+
+        self.assertTrue(
+            _is_unhelpful_refusal(
+                "I understand you're looking for a differential. However, I do not "
+                "have access to any of your health records or information at this time.",
+                context,
             )
         )
 

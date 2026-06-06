@@ -87,7 +87,12 @@ async def post_chat(
                 raise HTTPException(status_code=404, detail="NOT_FOUND")
             if row["profile_id"] is not None:
                 profile_uuid = row["profile_id"]
-            elif profile_uuid is not None:
+            else:
+                if profile_uuid is None:
+                    profile_uuid = await _default_profile_id(conn, user_id)
+                if profile_uuid is not None:
+                    await _assert_profile_owner(conn, profile_uuid, user_id)
+            if row["profile_id"] is None and profile_uuid is not None:
                 await conn.execute(
                     "UPDATE chat_conversations SET profile_id = $2 WHERE id = $1",
                     conversation_uuid,
@@ -255,6 +260,7 @@ async def delete_conversation(
 
 async def _build_context(conn, user_id: str, profile_id: uuid.UUID | None) -> dict:
     profile = None
+    include_unassigned = profile_id is None
     if profile_id is not None:
         profile = await conn.fetchrow(
             """
@@ -266,6 +272,7 @@ async def _build_context(conn, user_id: str, profile_id: uuid.UUID | None) -> di
             profile_id,
             user_id,
         )
+        include_unassigned = bool(profile and profile["relation"] == "self")
 
     values = await conn.fetch(
         """
@@ -274,7 +281,11 @@ async def _build_context(conn, user_id: str, profile_id: uuid.UUID | None) -> di
         FROM extracted_health_values ev
         LEFT JOIN document_upload_logs dul ON dul.id = ev.upload_log_id
         WHERE ev.user_id = $1
-          AND ($2::UUID IS NULL OR ev.profile_id = $2)
+          AND (
+            $2::UUID IS NULL
+            OR ev.profile_id = $2
+            OR ($3::BOOLEAN AND ev.profile_id IS NULL)
+          )
           AND (dul.is_deleted = FALSE OR ev.upload_log_id IS NULL)
           AND (ev.recorded_date IS NULL OR ev.recorded_date >= CURRENT_DATE - INTERVAL '90 days')
         ORDER BY ev.is_abnormal DESC NULLS LAST,
@@ -284,6 +295,7 @@ async def _build_context(conn, user_id: str, profile_id: uuid.UUID | None) -> di
         """,
         user_id,
         profile_id,
+        include_unassigned,
     )
     findings = await conn.fetch(
         """
@@ -291,7 +303,11 @@ async def _build_context(conn, user_id: str, profile_id: uuid.UUID | None) -> di
         FROM document_findings df
         LEFT JOIN document_upload_logs dul ON dul.id = df.upload_log_id
         WHERE df.user_id = $1
-          AND ($2::UUID IS NULL OR df.profile_id = $2)
+          AND (
+            $2::UUID IS NULL
+            OR df.profile_id = $2
+            OR ($3::BOOLEAN AND df.profile_id IS NULL)
+          )
           AND (dul.is_deleted = FALSE OR df.upload_log_id IS NULL)
         ORDER BY df.is_abnormal DESC NULLS LAST,
                  df.recorded_date DESC NULLS LAST,
@@ -300,19 +316,48 @@ async def _build_context(conn, user_id: str, profile_id: uuid.UUID | None) -> di
         """,
         user_id,
         profile_id,
+        include_unassigned,
     )
     cards = await conn.fetch(
         """
         SELECT symptom_description, prep_card, created_at
         FROM saved_prep_cards
-        WHERE user_id = $1 AND ($2::UUID IS NULL OR profile_id = $2)
+        WHERE user_id = $1
+          AND (
+            $2::UUID IS NULL
+            OR profile_id = $2
+            OR ($3::BOOLEAN AND profile_id IS NULL)
+          )
         ORDER BY created_at DESC
-        LIMIT 3
+        LIMIT 8
         """,
         user_id,
         profile_id,
+        include_unassigned,
+    )
+    recent_user_history = await conn.fetch(
+        """
+        SELECT cm.content, cm.created_at
+        FROM chat_messages cm
+        JOIN chat_conversations cc ON cc.id = cm.conversation_id
+        WHERE cc.user_id = $1
+          AND cm.role = 'user'
+          AND (
+            $2::UUID IS NULL
+            OR cc.profile_id = $2
+            OR ($3::BOOLEAN AND cc.profile_id IS NULL)
+          )
+        ORDER BY cm.created_at DESC
+        LIMIT 20
+        """,
+        user_id,
+        profile_id,
+        include_unassigned,
     )
     memory = await get_health_memory(conn, user_id, profile_id)
+    if include_unassigned and profile_id is not None:
+        legacy_memory = await get_health_memory(conn, user_id, None)
+        memory = _combine_health_memory(memory, legacy_memory)
     return {
         "profile": dict(profile) if profile else None,
         "health_memory": memory,
@@ -325,6 +370,15 @@ async def _build_context(conn, user_id: str, profile_id: uuid.UUID | None) -> di
                 "date": c["created_at"].date().isoformat(),
             }
             for c in cards
+        ],
+        "recent_user_health_statements": [
+            {
+                "content": row["content"],
+                "date": row["created_at"].date().isoformat(),
+            }
+            for row in recent_user_history
+            if len(str(row["content"]).strip()) >= 8
+            and not _is_diagnostic_question(str(row["content"]))
         ],
     }
 
@@ -362,7 +416,7 @@ async def _generate_reply(
         "Memory updates must contain only facts explicitly stated by the user or present "
         "in supplied records. Never store your own inference, diagnosis, or advice.\n\n"
         "Return only JSON with this schema: "
-        '{"reply":"string","sources_used":["health_memory|health_values|document_findings|prep_cards|general_knowledge"],'
+        '{"reply":"string","sources_used":["health_memory|health_values|document_findings|prep_cards|chat_history|general_knowledge"],'
         '"memory_updates":{"durable_facts":["string"],"recurring_concerns":["string"],'
         '"recent_episodes":["string"]}}.\n\n'
         f"User health context:\n{json.dumps(context, default=str)}"
@@ -392,7 +446,7 @@ async def _generate_reply(
             ["general_knowledge"],
             _empty_memory_updates(),
         )
-    if _is_diagnostic_question(message) and _is_unhelpful_refusal(reply):
+    if _is_diagnostic_question(message) and _is_unhelpful_refusal(reply, context):
         retry_messages = [
             *messages,
             {"role": "assistant", "content": json.dumps(data, default=str)},
@@ -418,7 +472,7 @@ async def _generate_reply(
 
         if isinstance(retry_data, dict):
             retry_reply = str(retry_data.get("reply") or "").strip()
-            if retry_reply and not _is_unhelpful_refusal(retry_reply):
+            if retry_reply and not _is_unhelpful_refusal(retry_reply, context):
                 return (
                     retry_reply,
                     _normalise_sources(retry_data.get("sources_used")),
@@ -435,7 +489,14 @@ async def _generate_reply(
 
 
 def _normalise_sources(value) -> list[str]:
-    allowed = {"health_memory", "health_values", "document_findings", "prep_cards", "general_knowledge"}
+    allowed = {
+        "health_memory",
+        "health_values",
+        "document_findings",
+        "prep_cards",
+        "chat_history",
+        "general_knowledge",
+    }
     if not isinstance(value, list):
         return ["general_knowledge"]
     sources = [str(source) for source in value if str(source) in allowed]
@@ -546,6 +607,12 @@ def _fallback_evidence(context: dict) -> str:
         if name and raw:
             items.append(" ".join(part for part in (name, raw, unit) if part))
 
+    for statement in (context.get("recent_user_health_statements") or [])[:3]:
+        content = str(statement.get("content") or "").strip()
+        date = str(statement.get("date") or "").strip()
+        if content:
+            items.append(f"{content[:180]} ({date})" if date else content[:180])
+
     return "; ".join(items[:5])
 
 
@@ -581,7 +648,7 @@ def _is_diagnostic_question(message: str) -> bool:
     )
 
 
-def _is_unhelpful_refusal(reply: str) -> bool:
+def _is_unhelpful_refusal(reply: str, context: dict | None = None) -> bool:
     lowered = reply.casefold()
     refusal_markers = (
         "i cannot provide a diagnosis",
@@ -593,18 +660,37 @@ def _is_unhelpful_refusal(reply: str) -> bool:
         "not to act as a medical professional",
         "consult with a doctor or other qualified",
         "only a licensed healthcare professional",
+        "i do not have access to any of your health records",
+        "i don't have access to any of your health records",
+        "i do not have access to your health records",
+        "without this information, i cannot offer",
+        "please provide me with some details about your health concerns",
     )
     useful_markers = (
-        "possibilit",
-        "differential",
         "consistent with",
-        "evidence",
         "could be",
         "may be",
+        "one possibility",
+        "most plausible",
+        "less likely",
     )
-    return any(marker in lowered for marker in refusal_markers) and not any(
+    generic_refusal = any(marker in lowered for marker in refusal_markers) and not any(
         marker in lowered for marker in useful_markers
     )
+    false_no_context_claim = (
+        _context_has_evidence(context or {})
+        and any(
+            marker in lowered
+            for marker in (
+                "do not have access to any of your health records",
+                "don't have access to any of your health records",
+                "do not have access to your health records",
+                "without this information",
+                "need details about your symptoms",
+            )
+        )
+    )
+    return generic_refusal or false_no_context_claim
 
 
 def _context_sources(context: dict) -> list[str]:
@@ -617,13 +703,80 @@ def _context_sources(context: dict) -> list[str]:
         sources.append("document_findings")
     if context.get("past_prep_cards"):
         sources.append("prep_cards")
+    if context.get("recent_user_health_statements"):
+        sources.append("chat_history")
     return sources or ["general_knowledge"]
+
+
+def _context_has_evidence(context: dict) -> bool:
+    memory = context.get("health_memory") or {}
+    return bool(
+        memory.get("summary")
+        or memory.get("durable_facts")
+        or memory.get("recurring_concerns")
+        or memory.get("notable_results")
+        or memory.get("recent_episodes")
+        or context.get("extracted_health_values")
+        or context.get("document_findings")
+        or context.get("past_prep_cards")
+        or context.get("recent_user_health_statements")
+    )
+
+
+def _combine_health_memory(primary: dict, legacy: dict) -> dict:
+    def combine_rows(key: str, limit: int) -> list:
+        rows = []
+        seen = set()
+        for item in [*(primary.get(key) or []), *(legacy.get(key) or [])]:
+            marker = json.dumps(item, sort_keys=True, default=str).casefold()
+            if marker not in seen:
+                rows.append(item)
+                seen.add(marker)
+        return rows[:limit]
+
+    durable_facts = combine_rows("durable_facts", 30)
+    recurring_concerns = combine_rows("recurring_concerns", 20)
+    notable_results = combine_rows("notable_results", 25)
+    recent_episodes = combine_rows("recent_episodes", 12)
+    summaries = [
+        str(value).strip()
+        for value in (primary.get("summary"), legacy.get("summary"))
+        if str(value or "").strip()
+    ]
+    return {
+        "summary": "\n".join(dict.fromkeys(summaries)),
+        "durable_facts": durable_facts,
+        "recurring_concerns": recurring_concerns,
+        "notable_results": notable_results,
+        "recent_episodes": recent_episodes,
+        "source_counts": {
+            **(legacy.get("source_counts") or {}),
+            **(primary.get("source_counts") or {}),
+        },
+        "updated_at": primary.get("updated_at") or legacy.get("updated_at"),
+    }
 
 
 async def _assert_profile_owner(conn, profile_id: uuid.UUID, user_id: str) -> None:
     row = await conn.fetchrow("SELECT id FROM profiles WHERE id = $1 AND user_id = $2", profile_id, user_id)
     if row is None:
         raise HTTPException(status_code=403, detail="FORBIDDEN")
+
+
+async def _default_profile_id(conn, user_id: str) -> uuid.UUID | None:
+    return await conn.fetchval(
+        """
+        SELECT id
+        FROM profiles
+        WHERE user_id = $1
+        ORDER BY CASE
+          WHEN COALESCE(relation, relationship) = 'self' THEN 0
+          ELSE 1
+        END, created_at ASC
+        LIMIT 1
+        """,
+        user_id,
+    )
 
 
 def _title(message: str) -> str:

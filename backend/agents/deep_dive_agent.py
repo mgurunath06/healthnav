@@ -71,6 +71,7 @@ Respond ONLY with a valid JSON object — no markdown fences, no text outside th
   scale → intensity or quantity on a spectrum ("rate your pain 1–10")
 - allow_other_text: true only for single_choice and multi_choice when the options may not cover the patient's experience. False for yes_no and scale always.
 - Respect the investigation depth and maximum follow-up budget supplied in the user message.
+- Do not stop before the supplied minimum follow-up exchanges have been completed. If the core dimensions are already known, ask about daily impact, pattern, associated symptoms, relief, or relevant history.
 - Stop asking (needs_followup=false) when the depth budget is exhausted or additional questions would not meaningfully change the prep card.
 - For Quick depth, always return needs_followup=false.
 
@@ -136,6 +137,7 @@ class DeepDiveInput(BaseModel):
     primary_symptom_category: str
     investigation_depth: int = 3
     max_followups: int = 4
+    minimum_followups: int = 2
     follow_up_history: list[FollowUpQA] = []
 
 
@@ -169,6 +171,7 @@ class DeepDiveAgent:
             f"Symptom description: {inp.symptom_description}\n"
             f"Primary symptom category: {inp.primary_symptom_category}\n"
             f"Investigation depth: {inp.investigation_depth}/5\n"
+            f"Minimum follow-up exchanges: {inp.minimum_followups}\n"
             f"Maximum follow-up exchanges: {inp.max_followups}\n"
             f"Depth guidance: {_DEPTH_GUIDANCE[inp.investigation_depth]}"
             f"{history_section}"

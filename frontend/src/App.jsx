@@ -1,4 +1,5 @@
 import { Routes, Route } from 'react-router-dom'
+import { useAuth } from '@clerk/clerk-react'
 import { useInvestigationStore } from './store/useInvestigationStore'
 import SymptomInput from './components/SymptomInput'
 import LoadingScreen from './components/LoadingScreen'
@@ -16,9 +17,23 @@ import ChatScreen from './components/ChatScreen'
 import './App.css'
 
 function InvestigationFlow() {
+  const { isLoaded } = useAuth()
   const screen          = useInvestigationStore((s) => s.screen)
   const followUpHistory = useInvestigationStore((s) => s.followUpHistory)
   const isWizardLoading = screen === 'loading' && followUpHistory.length > 0
+
+  if (!isLoaded) {
+    return (
+      <div className="app-canvas flex min-h-dvh items-center justify-center bg-warm-charcoal">
+        <div className="w-full max-w-xs px-6 text-center">
+          <div className="mx-auto h-px w-24 overflow-hidden bg-warm-border">
+            <div className="trace-runner" />
+          </div>
+          <p className="eyebrow mt-5 text-warm-muted">Opening your health desk</p>
+        </div>
+      </div>
+    )
+  }
 
   let content = <SymptomInput />
   if (screen === 'loading' && !isWizardLoading) content = <LoadingScreen />

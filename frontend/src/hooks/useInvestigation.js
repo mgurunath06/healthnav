@@ -1,10 +1,12 @@
 import { v4 as uuidv4 } from 'uuid'
+import { useAuth } from '@clerk/clerk-react'
 import { useInvestigationStore } from '../store/useInvestigationStore'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
 
 export function useInvestigation() {
   const store = useInvestigationStore()
+  const { getToken, isSignedIn } = useAuth()
 
   async function investigate(symptomDescription, followUpHistory = []) {
     let requestId = store.requestId
@@ -19,17 +21,21 @@ export function useInvestigation() {
     store.setError(null)
 
     try {
+      const token = isSignedIn ? await getToken() : null
       const body = {
         request_id: requestId,
         symptom_description: symptomDescription,
-        investigation_depth: store.investigationDepth,
+        investigation_depth: isSignedIn ? store.investigationDepth : 2,
         follow_up_history: followUpHistory,
         screening_context: store.apiResponse?.screening_context ?? null,
       }
 
       const res = await fetch(`${API_BASE}/investigate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify(body),
       })
 

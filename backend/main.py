@@ -1,10 +1,11 @@
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Header, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from auth import verify_clerk_token
 from pydantic import BaseModel, Field
 
 from agents.supervisor import Supervisor
@@ -87,7 +88,15 @@ def health():
 
 
 @app.post("/investigate")
-async def investigate(req: InvestigateRequest) -> dict:
+async def investigate(
+    req: InvestigateRequest,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    investigation_depth = 2
+    if authorization:
+        await verify_clerk_token(authorization)
+        investigation_depth = req.investigation_depth
+
     try:
         follow_up_history = [item.model_dump() for item in req.follow_up_history]
         if req.follow_up_answers and not follow_up_history:
@@ -103,7 +112,7 @@ async def investigate(req: InvestigateRequest) -> dict:
         return await _supervisor.run(
             request_id=req.request_id,
             symptom_description=req.symptom_description,
-            investigation_depth=req.investigation_depth,
+            investigation_depth=investigation_depth,
             follow_up_history=follow_up_history,
             screening_context=req.screening_context,
         )

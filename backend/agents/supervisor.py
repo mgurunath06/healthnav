@@ -7,7 +7,13 @@ import time
 from datetime import datetime, timezone
 
 from .assembler_agent import AssemblerAgent, AssemblerInput, AssemblerOutput
-from .deep_dive_agent import DeepDiveAgent, DeepDiveInput, DeepDiveOutput
+from .deep_dive_agent import (
+    DeepDiveAgent,
+    DeepDiveInput,
+    DeepDiveOutput,
+    FollowUpChoice,
+    FollowUpQuestion,
+)
 from .guardrail_agent import GuardrailAgent, GuardrailInput, GuardrailOutput
 from .lifestyle_agent import LifestyleAgent, LifestyleInput, LifestyleOutput
 from .openrouter_client import AgentFailure
@@ -16,6 +22,7 @@ from .screening_agent import ScreeningAgent, ScreeningInput, ScreeningOutput
 from .triage_agent import TriageAgent, TriageInput, TriageOutput
 
 _FOLLOWUP_BUDGETS = {1: 0, 2: 1, 3: 2, 4: 4, 5: 6}
+_FOLLOWUP_MINIMUMS = {1: 0, 2: 1, 3: 2, 4: 3, 5: 4}
 
 
 class Supervisor:
@@ -122,9 +129,11 @@ class Supervisor:
             follow_up_history,
             trace,
         )
+        minimum_followups = _FOLLOWUP_MINIMUMS.get(investigation_depth, 2)
+        below_minimum = len(follow_up_history) < minimum_followups
         if (
             deep_dive is not None
-            and deep_dive.needs_followup
+            and (deep_dive.needs_followup or below_minimum)
             and len(follow_up_history) < min(_MAX_FOLLOWUP, max_followups)
         ):
             # Stop early if key clinical dimensions are already covered
@@ -135,6 +144,9 @@ class Supervisor:
             ):
                 deduped = _dedup_questions(deep_dive.followup_questions, follow_up_history)
                 filtered = _filter_saturated_topics(deduped, follow_up_history)
+                if below_minimum and not filtered:
+                    fallback = _fallback_followup_question(follow_up_history)
+                    filtered = [fallback] if fallback is not None else []
                 if filtered:
                     return self._needs_followup(
                         request_id,
@@ -445,6 +457,7 @@ class Supervisor:
                     primary_symptom_category=category,
                     investigation_depth=investigation_depth,
                     max_followups=max_followups,
+                    minimum_followups=_FOLLOWUP_MINIMUMS.get(investigation_depth, 2),
                     follow_up_history=follow_up_history,
                 )
             )
@@ -774,8 +787,7 @@ def _findings_sufficient(
     investigation_depth: int = 3,
 ) -> bool:
     """True when core clinical dimensions are covered — safe to stop asking."""
-    minimum_by_depth = {1: 0, 2: 1, 3: 2, 4: 4, 5: 6}
-    if len(follow_up_history) < minimum_by_depth.get(investigation_depth, 2):
+    if len(follow_up_history) < _FOLLOWUP_MINIMUMS.get(investigation_depth, 2):
         return False
     return (
         findings.duration is not None
@@ -783,3 +795,67 @@ def _findings_sufficient(
         and findings.frequency is not None
         and len(findings.triggers) > 0
     )
+
+
+def _fallback_followup_question(
+    follow_up_history: list[dict],
+) -> FollowUpQuestion | None:
+    """Return a useful unanswered dimension when the model stops before the depth minimum."""
+    asked = " ".join(item.get("question_text", "").lower() for item in follow_up_history)
+    candidates = [
+        (
+            ("severe", "severity", "scale", "rate"),
+            FollowUpQuestion(
+                id="fallback_severity",
+                question="On a scale from 1 to 10, how intense is this at its worst?",
+                type="scale",
+                scale_min=1,
+                scale_max=10,
+                scale_min_label="Barely noticeable",
+                scale_max_label="Worst imaginable",
+            ),
+        ),
+        (
+            ("often", "frequency", "constant", "come and go"),
+            FollowUpQuestion(
+                id="fallback_frequency",
+                question="Which pattern best describes how often this happens?",
+                type="single_choice",
+                choices=[
+                    FollowUpChoice(value="constant", label="Constant"),
+                    FollowUpChoice(value="daily_episodes", label="Episodes every day"),
+                    FollowUpChoice(value="some_days", label="Only on some days"),
+                    FollowUpChoice(value="one_episode", label="One episode so far"),
+                ],
+                allow_other_text=True,
+            ),
+        ),
+        (
+            ("trigger", "worse", "bring it on"),
+            FollowUpQuestion(
+                id="fallback_triggers",
+                question="Have you noticed anything that reliably brings it on or makes it worse?",
+                type="yes_no",
+            ),
+        ),
+        (
+            ("relief", "better", "ease", "help"),
+            FollowUpQuestion(
+                id="fallback_relief",
+                question="Does rest, movement, food, medication, or anything else make it better?",
+                type="yes_no",
+            ),
+        ),
+        (
+            ("other symptom", "along with", "associated"),
+            FollowUpQuestion(
+                id="fallback_associated",
+                question="Have you noticed any other symptoms occurring at the same time?",
+                type="yes_no",
+            ),
+        ),
+    ]
+    for keywords, question in candidates:
+        if not any(keyword in asked for keyword in keywords):
+            return question
+    return None

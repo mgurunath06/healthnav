@@ -392,6 +392,45 @@ async def _generate_reply(
             ["general_knowledge"],
             _empty_memory_updates(),
         )
+    if _is_diagnostic_question(message) and _is_unhelpful_refusal(reply):
+        retry_messages = [
+            *messages,
+            {"role": "assistant", "content": json.dumps(data, default=str)},
+            {
+                "role": "user",
+                "content": (
+                    "That answer was an unhelpful generic refusal. Do not claim a diagnosis. "
+                    "Instead, use my supplied records to provide an educational differential: "
+                    "plausible possibilities, evidence for and against each, missing information, "
+                    "red flags, and the next clinical step. Return the required JSON only."
+                ),
+            },
+        ]
+        try:
+            retry_data = await _client.chat(
+                role="companion",
+                messages=retry_messages,
+                temperature=0.2,
+            )
+        except Exception:
+            logger.exception("Companion differential retry failed")
+            retry_data = None
+
+        if isinstance(retry_data, dict):
+            retry_reply = str(retry_data.get("reply") or "").strip()
+            if retry_reply and not _is_unhelpful_refusal(retry_reply):
+                return (
+                    retry_reply,
+                    _normalise_sources(retry_data.get("sources_used")),
+                    _normalise_memory_updates(retry_data.get("memory_updates")),
+                )
+
+        logger.warning("Companion returned repeated generic diagnosis refusal")
+        return (
+            _fallback_reply(message, context),
+            _context_sources(context),
+            _empty_memory_updates(),
+        )
     return reply, sources, _normalise_memory_updates(data.get("memory_updates"))
 
 
@@ -454,18 +493,7 @@ def _meaningful_tokens(value: str) -> set[str]:
 
 
 def _fallback_reply(message: str, context: dict) -> str:
-    clinical_question = any(
-        phrase in message.lower()
-        for phrase in (
-            "do i have",
-            "should i take",
-            "am i okay",
-            "is this normal",
-            "what is wrong with me",
-            "diagnose",
-            "dosage",
-        )
-    )
+    clinical_question = _is_diagnostic_question(message)
     has_records = any(
         context.get(key)
         for key in ("extracted_health_values", "document_findings", "past_prep_cards")
@@ -526,6 +554,70 @@ def _strip_standard_disclaimer(reply: str) -> str:
     while cleaned.casefold().endswith(_DISCLAIMER.casefold()):
         cleaned = cleaned[: -len(_DISCLAIMER)].rstrip()
     return cleaned
+
+
+def _is_diagnostic_question(message: str) -> bool:
+    lowered = message.casefold()
+    return any(
+        phrase in lowered
+        for phrase in (
+            "do i have",
+            "what do i have",
+            "what ailment",
+            "which ailment",
+            "what condition",
+            "which condition",
+            "what disease",
+            "what is wrong with me",
+            "based on my information",
+            "basis the information",
+            "should i take",
+            "am i okay",
+            "is this normal",
+            "diagnose",
+            "diagnosis",
+            "dosage",
+        )
+    )
+
+
+def _is_unhelpful_refusal(reply: str) -> bool:
+    lowered = reply.casefold()
+    refusal_markers = (
+        "i cannot provide a diagnosis",
+        "i can't provide a diagnosis",
+        "i cannot diagnose",
+        "i can't diagnose",
+        "cannot tell you what ailments",
+        "can't tell you what ailments",
+        "not to act as a medical professional",
+        "consult with a doctor or other qualified",
+        "only a licensed healthcare professional",
+    )
+    useful_markers = (
+        "possibilit",
+        "differential",
+        "consistent with",
+        "evidence",
+        "could be",
+        "may be",
+    )
+    return any(marker in lowered for marker in refusal_markers) and not any(
+        marker in lowered for marker in useful_markers
+    )
+
+
+def _context_sources(context: dict) -> list[str]:
+    sources = []
+    if context.get("health_memory"):
+        sources.append("health_memory")
+    if context.get("extracted_health_values"):
+        sources.append("health_values")
+    if context.get("document_findings"):
+        sources.append("document_findings")
+    if context.get("past_prep_cards"):
+        sources.append("prep_cards")
+    return sources or ["general_knowledge"]
 
 
 async def _assert_profile_owner(conn, profile_id: uuid.UUID, user_id: str) -> None:

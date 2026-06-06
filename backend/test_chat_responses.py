@@ -1,6 +1,11 @@
 from unittest import TestCase
 
-from routers.chat import _fallback_reply, _strip_standard_disclaimer
+from routers.chat import (
+    _fallback_reply,
+    _is_diagnostic_question,
+    _is_unhelpful_refusal,
+    _strip_standard_disclaimer,
+)
 
 
 class ChatResponseTests(TestCase):
@@ -45,3 +50,24 @@ class ChatResponseTests(TestCase):
         )
 
         self.assertEqual("Here is the useful answer.", reply)
+
+    def test_detects_ailment_question_and_generic_refusal(self):
+        self.assertTrue(
+            _is_diagnostic_question(
+                "Basis the information you have, what ailments do I have?"
+            )
+        )
+        self.assertTrue(
+            _is_unhelpful_refusal(
+                "I cannot provide a diagnosis or tell you what ailments you have. "
+                "Please consult with a doctor or other qualified healthcare provider."
+            )
+        )
+
+    def test_useful_differential_is_not_treated_as_refusal(self):
+        self.assertFalse(
+            _is_unhelpful_refusal(
+                "I cannot diagnose, but the evidence could be consistent with migraine "
+                "or tension headache. Migraine is one possibility because of light sensitivity."
+            )
+        )

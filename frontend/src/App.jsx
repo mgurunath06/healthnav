@@ -14,10 +14,12 @@ import DocumentUploadScreen from './screens/DocumentUploadScreen'
 import PrivateRoute from './components/PrivateRoute'
 import ProfileScreen from './components/ProfileScreen'
 import ChatScreen from './components/ChatScreen'
+import ProfileOnboardingGate from './components/ProfileOnboardingGate'
+import ProfileDetailScreen from './components/ProfileDetailScreen'
 import './App.css'
 
 function InvestigationFlow() {
-  const { isLoaded } = useAuth()
+  const { isLoaded, isSignedIn } = useAuth()
   const screen          = useInvestigationStore((s) => s.screen)
   const followUpHistory = useInvestigationStore((s) => s.followUpHistory)
   const isWizardLoading = screen === 'loading' && followUpHistory.length > 0
@@ -42,7 +44,8 @@ function InvestigationFlow() {
   if (screen === 'emergency') content = <EmergencyScreen />
   if (screen === 'redirect') content = <RedirectScreen />
   if (screen === 'error') content = <ErrorScreen />
-  return <div key={screen} className="route-reveal">{content}</div>
+  const flow = <div key={screen} className="route-reveal">{content}</div>
+  return isSignedIn ? <ProfileOnboardingGate>{flow}</ProfileOnboardingGate> : flow
 }
 
 export default function App() {
@@ -53,6 +56,7 @@ export default function App() {
       <Route path="/dashboard"         element={<PrivateRoute><PremiumDashboard /></PrivateRoute>} />
       <Route path="/dashboard/upload"  element={<PrivateRoute><DocumentUploadScreen /></PrivateRoute>} />
       <Route path="/profile"           element={<PrivateRoute><ProfileScreen /></PrivateRoute>} />
+      <Route path="/profile/:profileId" element={<PrivateRoute><ProfileDetailScreen /></PrivateRoute>} />
       <Route path="/chat"              element={<PrivateRoute><ChatScreen /></PrivateRoute>} />
     </Routes>
   )

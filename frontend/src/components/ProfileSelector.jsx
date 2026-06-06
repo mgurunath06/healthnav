@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth, useUser } from '@clerk/clerk-react'
 import { apiFetch } from '../lib/api'
+import { Link } from 'react-router-dom'
 
 export default function ProfileSelector({ value, onChange, includeAll = false }) {
   const { getToken } = useAuth()
@@ -40,6 +41,7 @@ export default function ProfileSelector({ value, onChange, includeAll = false })
   }
 
   return (
+    <div>
     <label className="block">
       <span className="font-mono text-xs text-warm-muted tracking-widest uppercase block mb-2">
         {includeAll ? 'Profile' : 'Chatting about'}
@@ -60,5 +62,9 @@ export default function ProfileSelector({ value, onChange, includeAll = false })
         ))}
       </select>
     </label>
+    <Link to="/profile" className="mt-2 inline-block font-sans text-xs text-warm-muted hover:text-accent">
+      Manage family profiles
+    </Link>
+    </div>
   )
 }

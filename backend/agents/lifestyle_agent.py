@@ -146,12 +146,18 @@ class LifestyleAgent:
 
 
 def _personal_context_section(context: dict | None) -> str:
-    if not context or not context.get("summary"):
+    if not context:
         return ""
+    summary = context.get("summary") or "No prior profile-specific summary."
     return (
         "\n\nRelevant personal health memory:\n"
-        f"{context['summary']}\n"
+        f"Subject profile: {context.get('profile') or {}}\n"
+        f"{summary}\n"
+        f"Family history summaries: {context.get('family_history') or []}\n"
+        f"Family-risk considerations: {context.get('family_risk_considerations') or []}\n"
         f"Current setting: {context.get('current_context') or {}}\n"
+        "Do not merge a relative's condition into the subject's history. Family conditions "
+        "may support a clinician-led screening discussion when age and risk make it relevant.\n"
         "Mention a possible pattern only when repeated dated episodes support it. Require at least "
         "three similar episodes for unusual correlations such as lunar phase and explicitly note that "
         "coincidence is possible. State the count and phrase it as something to discuss with a licensed "

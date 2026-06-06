@@ -17,6 +17,12 @@ from db.health_memory import (
     get_health_memory,
     merge_health_memory,
 )
+from db.profile_context import (
+    ensure_family_profile_schema,
+    family_risk_considerations,
+    list_family_profiles,
+    public_profile,
+)
 from db.users import ensure_user
 from routers.cards import router as cards_router
 from routers.chat import router as chat_router
@@ -30,6 +36,7 @@ async def lifespan(app: FastAPI):
     if pool is not None:
         async with pool.acquire() as conn:
             await ensure_health_memory_schema(conn)
+            await ensure_family_profile_schema(conn)
     yield
     await close_pool()
 
@@ -142,6 +149,51 @@ async def investigate(
                     if owner is None:
                         return {"status": "error", "message": "Invalid health profile."}
                 personal_context = await get_health_memory(conn, user_id, profile_id)
+                family_profiles = await list_family_profiles(conn, user_id)
+                personal_context["profile"] = next(
+                    (
+                        public_profile(profile)
+                        for profile in family_profiles
+                        if profile["id"] == profile_id
+                    ),
+                    None,
+                )
+                personal_context["family_history"] = []
+                for family_profile in family_profiles:
+                    if family_profile["id"] == profile_id:
+                        continue
+                    family_memory = await get_health_memory(
+                        conn,
+                        user_id,
+                        family_profile["id"],
+                    )
+                    personal_context["family_history"].append(
+                        {
+                            **public_profile(family_profile),
+                            "health_summary": family_memory.get("summary") or "",
+                        }
+                    )
+                subject_profile = next(
+                    (profile for profile in family_profiles if profile["id"] == profile_id),
+                    None,
+                )
+                personal_context["family_risk_considerations"] = family_risk_considerations(
+                    subject_profile,
+                    [
+                        {
+                            **profile,
+                            "health_summary": next(
+                                (
+                                    item["health_summary"]
+                                    for item in personal_context["family_history"]
+                                    if item["id"] == str(profile["id"])
+                                ),
+                                "",
+                            ),
+                        }
+                        for profile in family_profiles
+                    ],
+                )
                 user_location = await conn.fetchrow(
                     "SELECT location_city, location_country FROM users WHERE id = $1",
                     user_id,

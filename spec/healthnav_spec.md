@@ -5,6 +5,10 @@
 > **Source of truth:** This document. Code must conform. If reality forces a change, update this doc *first*, then code.
 
 ### Changelog
+- **v2.6** — Complete family profile graph: first-login self onboarding,
+  relationship hierarchy, profile viewers, automatic natural-language profile
+  creation, profile-aware chat and investigation context, family-risk signals,
+  patient-name document routing, reassignment, and independent deletion.
 - **v2.5** — Longitudinal profile memory and authenticated interaction redesign.
   Anonymous investigation depth is fixed at level 2; signed-in users receive a
   dedicated profile-aware workspace and clinical depth dial. NavChat and symptom
@@ -2417,3 +2421,49 @@ Content hash computed once. On upload, before any LLM call. Never recomputed. SH
 Duplicate check skipped for force_reupload = true. No further duplicate check; a new log row is created as normal.
 No bulk delete in v1. Users delete one upload at a time. Bulk operations deferred.
 Sprint assignment: GET /documents, GET /documents/{id}, soft delete, and duplicate detection all land in Sprint 7 alongside the upload pipeline. The content_hash column and is_deleted column must be added in migration 003 alongside the profiles migration.
+## 19.8 Family Profile Graph
+
+HealthNav supports one account owner managing multiple independent people. A
+profile is the canonical subject for documents, investigations, saved briefs,
+conversations, and compact health memory.
+
+Profile identity includes:
+
+- Display name and alternate names found on medical records
+- Relationship to the account holder
+- Date of birth and computed age
+- Sex recorded at birth
+- Stable context notes
+
+The self profile is created automatically and completed through mandatory
+first-login onboarding. It cannot be deleted. Family profiles have independent
+lifecycles and may be created, edited, or deleted. Deletion removes linked
+documents, extracted values, findings, cards, conversations, and memory in one
+transaction.
+
+The family directory is presented as a relationship hierarchy. Each person has a
+dedicated profile viewer with compact memory, demographics, recent records, and
+profile-bound actions for chat, upload, and symptom investigation. Destination
+routes receive the selected profile automatically.
+
+### Subject Resolution
+
+Natural-language references are resolved against names, aliases, and relationship
+terms. A missing relationship profile may be created from an explicit phrase such
+as "my father." A single resolved non-primary person receives grounded memory
+updates; references resolving to multiple people do not write memory.
+
+Documents are resolved from extracted patient names. High-confidence name or alias
+matches determine the subject before persistence. Generic selected profiles may be
+named from the report; unmatched named patients receive a new independent profile.
+Users retain a reassignment control, which moves raw extracted data and removes the
+moved document's exact evidence from the previous profile's compact memory.
+
+### Cross-Profile Reasoning
+
+Agents receive the primary subject's detailed memory, compact summaries for family
+members, and detailed context only for explicitly referenced relatives. Family
+history can inform personalized questions and clinician-led screening discussions,
+including parental diabetes, cardiovascular history, and relevant cancer patterns.
+The response must name the relative providing the evidence and must never promote
+a relative's condition into the subject's diagnosis.

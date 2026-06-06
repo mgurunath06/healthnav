@@ -12,6 +12,14 @@ from agents.openrouter_client import AgentFailure, OpenRouterClient
 from auth import verify_clerk_token
 from db.client import get_pool
 from db.health_memory import get_health_memory, merge_health_memory
+from db.profile_context import (
+    ensure_profiles_from_message,
+    family_risk_considerations,
+    list_family_profiles,
+    memory_target_profile,
+    public_profile,
+    resolve_referenced_profiles,
+)
 from db.users import ensure_user
 
 router = APIRouter(tags=["chat"])
@@ -48,6 +56,13 @@ async def post_chat(
 
     async with pool.acquire() as conn:
         user_id = await ensure_user(conn, clerk_user_id)
+        family_profiles = await list_family_profiles(conn, user_id)
+        family_profiles = await ensure_profiles_from_message(
+            conn,
+            user_id,
+            body.message,
+            family_profiles,
+        )
         if profile_uuid is None and conversation_uuid is None:
             profile_uuid = await conn.fetchval(
                 """
@@ -99,7 +114,14 @@ async def post_chat(
                     profile_uuid,
                 )
 
-        context = await _build_context(conn, user_id, profile_uuid)
+        referenced_profiles = resolve_referenced_profiles(body.message, family_profiles)
+        context = await _build_context(
+            conn,
+            user_id,
+            profile_uuid,
+            family_profiles=family_profiles,
+            referenced_profiles=referenced_profiles,
+        )
         history = await conn.fetch(
             """
             SELECT role, content
@@ -144,11 +166,15 @@ async def post_chat(
                 "UPDATE chat_conversations SET updated_at = NOW() WHERE id = $1",
                 conversation_uuid,
             )
-            if any(memory_updates.values()):
+            memory_profile_id = memory_target_profile(
+                profile_uuid,
+                referenced_profiles,
+            )
+            if any(memory_updates.values()) and memory_profile_id is not None:
                 await merge_health_memory(
                     conn,
                     user_id,
-                    profile_uuid,
+                    memory_profile_id,
                     durable_facts=memory_updates["durable_facts"],
                     recurring_concerns=memory_updates["recurring_concerns"],
                     recent_episodes=memory_updates["recent_episodes"],
@@ -258,7 +284,14 @@ async def delete_conversation(
     return {"deleted": True, "conversation_id": conversation_id}
 
 
-async def _build_context(conn, user_id: str, profile_id: uuid.UUID | None) -> dict:
+async def _build_context(
+    conn,
+    user_id: str,
+    profile_id: uuid.UUID | None,
+    *,
+    family_profiles: list[dict] | None = None,
+    referenced_profiles: list[dict] | None = None,
+) -> dict:
     profile = None
     include_unassigned = profile_id is None
     if profile_id is not None:
@@ -357,6 +390,25 @@ async def _build_context(conn, user_id: str, profile_id: uuid.UUID | None) -> di
     if include_unassigned and profile_id is not None:
         legacy_memory = await get_health_memory(conn, user_id, None)
         memory = _combine_health_memory(memory, legacy_memory)
+    family_profiles = family_profiles or await list_family_profiles(conn, user_id)
+    referenced_ids = {
+        profile["id"] for profile in (referenced_profiles or [])
+        if profile["id"] != profile_id
+    }
+    family_context = []
+    for family_profile in family_profiles:
+        family_memory = await get_health_memory(conn, user_id, family_profile["id"])
+        item = {
+            **public_profile(family_profile),
+            "health_summary": family_memory.get("summary") or "",
+        }
+        if family_profile["id"] in referenced_ids:
+            item["health_memory"] = family_memory
+        family_context.append(item)
+    subject_profile = next(
+        (profile for profile in family_profiles if profile["id"] == profile_id),
+        None,
+    )
     return {
         "profile": dict(profile) if profile else None,
         "health_memory": memory,
@@ -379,6 +431,18 @@ async def _build_context(conn, user_id: str, profile_id: uuid.UUID | None) -> di
             if len(str(row["content"]).strip()) >= 8
             and not _is_diagnostic_question(str(row["content"]))
         ],
+        "family_profiles": family_context,
+        "family_risk_considerations": family_risk_considerations(
+            subject_profile,
+            [
+                {
+                    **profile,
+                    "health_summary": item["health_summary"],
+                }
+                for profile, item in zip(family_profiles, family_context)
+            ],
+        ),
+        "referenced_profile_ids": [str(profile["id"]) for profile in (referenced_profiles or [])],
     }
 
 
@@ -421,10 +485,19 @@ async def _generate_reply(
         "is established. Use language such "
         "as 'I notice' or 'this may be a pattern worth discussing', never causal claims "
         "such as a city being bad for the person's body. Do not treat a pattern as a diagnosis.\n\n"
+        "Family profiles are independent medical records. Use the primary profile for the "
+        "person currently being discussed, and use family_profiles only for relevant family "
+        "history or when the user explicitly names another person. Never merge one person's "
+        "symptoms, tests, medications, or diagnoses into another person's record. You may "
+        "identify evidence-based familial risk considerations, such as discussing diabetes "
+        "screening when a parent has diabetes, but account for the target person's age, sex, "
+        "existing results, symptoms, and standard clinician-led risk assessment. State which "
+        "relative supplies the family-history evidence. If a person reference is ambiguous, "
+        "ask the user to identify the profile rather than guessing.\n\n"
         "Memory updates must contain only facts explicitly stated by the user or present "
         "in supplied records. Never store your own inference, diagnosis, or advice.\n\n"
         "Return only JSON with this schema: "
-        '{"reply":"string","sources_used":["health_memory|health_values|document_findings|prep_cards|chat_history|general_knowledge"],'
+        '{"reply":"string","sources_used":["health_memory|health_values|document_findings|prep_cards|chat_history|family_history|general_knowledge"],'
         '"memory_updates":{"durable_facts":["string"],"recurring_concerns":["string"],'
         '"recent_episodes":["string"]}}.\n\n'
         f"User health context:\n{json.dumps(context, default=str)}"
@@ -503,6 +576,7 @@ def _normalise_sources(value) -> list[str]:
         "document_findings",
         "prep_cards",
         "chat_history",
+        "family_history",
         "general_knowledge",
     }
     if not isinstance(value, list):
@@ -713,6 +787,8 @@ def _context_sources(context: dict) -> list[str]:
         sources.append("prep_cards")
     if context.get("recent_user_health_statements"):
         sources.append("chat_history")
+    if context.get("family_profiles"):
+        sources.append("family_history")
     return sources or ["general_knowledge"]
 
 

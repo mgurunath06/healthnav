@@ -127,6 +127,44 @@ async def merge_health_memory(
     }
 
 
+async def remove_health_memory_items(
+    conn: Connection,
+    user_id: str,
+    profile_id: uuid.UUID | None,
+    *,
+    durable_facts: Iterable[str] = (),
+    notable_results: Iterable[str] = (),
+) -> None:
+    current = await get_health_memory(conn, user_id, profile_id)
+    remove_facts = {_normalise(item) for item in durable_facts}
+    remove_results = {_normalise(item) for item in notable_results}
+    facts = [item for item in current["durable_facts"] if _normalise(item) not in remove_facts]
+    results = [item for item in current["notable_results"] if _normalise(item) not in remove_results]
+    summary = _build_summary(
+        facts,
+        current["recurring_concerns"],
+        results,
+        current["recent_episodes"],
+    )
+    await conn.execute(
+        """
+        UPDATE profile_health_memory
+        SET summary = $3,
+            durable_facts = $4::JSONB,
+            notable_results = $5::JSONB,
+            updated_at = NOW()
+        WHERE user_id = $1
+          AND COALESCE(profile_id, $6::UUID) = COALESCE($2::UUID, $6::UUID)
+        """,
+        user_id,
+        profile_id,
+        summary,
+        json.dumps(facts),
+        json.dumps(results),
+        _EMPTY_UUID,
+    )
+
+
 def _merge(existing: Iterable[str], additions: Iterable[str], limit: int) -> list[str]:
     rows: list[str] = []
     seen: set[str] = set()
@@ -138,6 +176,10 @@ def _merge(existing: Iterable[str], additions: Iterable[str], limit: int) -> lis
         seen.add(key)
         rows.append(value[:500])
     return rows[:limit]
+
+
+def _normalise(value: str) -> str:
+    return " ".join(str(value).casefold().split())
 
 
 def _build_summary(

@@ -13,7 +13,12 @@ from pydantic import BaseModel
 from agents.document_agent import DocumentAgent, ExtractionResult
 from auth import verify_clerk_token
 from db.client import get_pool
-from db.health_memory import merge_health_memory
+from db.health_memory import merge_health_memory, remove_health_memory_items
+from db.profile_context import (
+    create_profile_for_document,
+    list_family_profiles,
+    match_patient_profile,
+)
 from db.users import ensure_user
 
 logger = logging.getLogger(__name__)
@@ -39,6 +44,10 @@ class UploadResponse(BaseModel):
     conclusions: list[str]
     conditions_mentioned: list[str]
     processing_note: str | None
+    assigned_profile_id: str | None = None
+    assigned_profile_name: str | None = None
+    subject_match_status: str | None = None
+    subject_match_confidence: float | None = None
 
 
 class DuplicateDetectedResponse(BaseModel):
@@ -106,6 +115,10 @@ class DeleteResponse(BaseModel):
     deleted: bool
     upload_id: str
     note: str
+
+
+class DocumentProfileUpdate(BaseModel):
+    profile_id: str
 
 
 # ── POST /documents/upload ────────────────────────────────────────────────────
@@ -184,6 +197,65 @@ async def upload_document(
                 db_user_id = await ensure_user(conn, clerk_user_id)
             if db_profile_id is not None:
                 await _assert_profile_owner(conn, db_profile_id, db_user_id)
+            profiles = await list_family_profiles(conn, db_user_id)
+            matched_profile_id, match_confidence = match_patient_profile(
+                meta.patient_name,
+                profiles,
+            )
+            original_profile_id = db_profile_id
+            original_profile = next(
+                (profile for profile in profiles if profile["id"] == original_profile_id),
+                None,
+            )
+            if matched_profile_id is not None:
+                db_profile_id = matched_profile_id
+                match_status = (
+                    "confirmed"
+                    if original_profile_id in (None, matched_profile_id)
+                    else "reassigned"
+                )
+            elif meta.patient_name:
+                generic_names = {
+                    "me",
+                    str(original_profile.get("relation") if original_profile else "").casefold(),
+                }
+                selected_name = str(
+                    original_profile.get("display_name") if original_profile else ""
+                ).casefold()
+                if original_profile and selected_name in generic_names:
+                    await conn.execute(
+                        """
+                        UPDATE profiles
+                        SET display_name = $3, name = $3,
+                            sex = COALESCE(sex, $4), updated_at = NOW()
+                        WHERE id = $1 AND user_id = $2
+                        """,
+                        original_profile_id,
+                        db_user_id,
+                        meta.patient_name,
+                        meta.patient_sex,
+                    )
+                    original_profile["display_name"] = meta.patient_name
+                    original_profile["sex"] = original_profile.get("sex") or meta.patient_sex
+                    match_status = "profile_named"
+                    match_confidence = 0.8
+                else:
+                    created_profile = await create_profile_for_document(
+                        conn,
+                        db_user_id,
+                        meta.patient_name,
+                        meta.patient_sex,
+                    )
+                    profiles.append(created_profile)
+                    db_profile_id = created_profile["id"]
+                    match_status = "profile_created"
+                    match_confidence = max(match_confidence, 0.65)
+            else:
+                match_status = "selected"
+            assigned_profile = next(
+                (profile for profile in profiles if profile["id"] == db_profile_id),
+                None,
+            )
             async with conn.transaction():
                 await conn.execute(
                     """
@@ -192,8 +264,10 @@ async def upload_document(
                        profile_id,
                        extraction_status, values_extracted, patient_name,
                        reporting_doctor, referring_doctor, hospital_or_lab, processing_note,
-                       conclusions, conditions_mentioned, extracted_text, content_hash)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+                       conclusions, conditions_mentioned, extracted_text, content_hash,
+                       subject_match_status, subject_match_confidence,
+                       originally_selected_profile_id)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
                     """,
                     log_id,
                     db_user_id,
@@ -212,6 +286,9 @@ async def upload_document(
                     json.dumps(result.conditions_mentioned),
                     result.extracted_text,
                     content_hash,
+                    match_status,
+                    match_confidence,
+                    original_profile_id,
                 )
 
                 if result.extraction_status in ("success", "partial"):
@@ -280,6 +357,12 @@ async def upload_document(
         conclusions=result.conclusions,
         conditions_mentioned=result.conditions_mentioned,
         processing_note=result.processing_note,
+        assigned_profile_id=str(db_profile_id) if db_profile_id else None,
+        assigned_profile_name=(
+            assigned_profile["display_name"] if pool is not None and assigned_profile else None
+        ),
+        subject_match_status=match_status if pool is not None else None,
+        subject_match_confidence=match_confidence if pool is not None else None,
     )
 
 
@@ -353,6 +436,80 @@ async def list_documents(
     ]
 
     return DocumentListResponse(uploads=uploads, total=len(uploads))
+
+
+@router.patch("/{upload_id}/profile")
+async def reassign_document_profile(
+    upload_id: str,
+    body: DocumentProfileUpdate,
+    clerk_user_id: str = Depends(verify_clerk_token),
+) -> dict:
+    pool = await get_pool()
+    if pool is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    upload_uuid = _parse_uuid(upload_id)
+    target_profile_id = _parse_optional_uuid(body.profile_id)
+    if target_profile_id is None:
+        raise HTTPException(status_code=422, detail="profile_id is required")
+
+    async with pool.acquire() as conn:
+        user_id = await ensure_user(conn, clerk_user_id)
+        await _assert_profile_owner(conn, target_profile_id, user_id)
+        document = await conn.fetchrow(
+            """
+            SELECT id, profile_id, conditions_mentioned
+            FROM document_upload_logs
+            WHERE id = $1 AND user_id = $2 AND is_deleted = FALSE
+            """,
+            upload_uuid,
+            user_id,
+        )
+        if document is None:
+            raise HTTPException(status_code=404, detail="NOT_FOUND")
+        old_profile_id = document["profile_id"]
+        if old_profile_id == target_profile_id:
+            return {"updated": True, "upload_id": upload_id, "profile_id": body.profile_id}
+
+        conditions = _json_list(document["conditions_mentioned"])
+        notable_results = await _document_notable_results(conn, upload_uuid)
+        async with conn.transaction():
+            await conn.execute(
+                """
+                UPDATE document_upload_logs
+                SET profile_id = $3, subject_match_status = 'manually_reassigned',
+                    subject_match_confidence = 1
+                WHERE id = $1 AND user_id = $2
+                """,
+                upload_uuid,
+                user_id,
+                target_profile_id,
+            )
+            await conn.execute(
+                "UPDATE extracted_health_values SET profile_id = $2 WHERE upload_log_id = $1",
+                upload_uuid,
+                target_profile_id,
+            )
+            await conn.execute(
+                "UPDATE document_findings SET profile_id = $2 WHERE upload_log_id = $1",
+                upload_uuid,
+                target_profile_id,
+            )
+            await remove_health_memory_items(
+                conn,
+                user_id,
+                old_profile_id,
+                durable_facts=conditions,
+                notable_results=notable_results,
+            )
+            await merge_health_memory(
+                conn,
+                user_id,
+                target_profile_id,
+                durable_facts=conditions,
+                notable_results=notable_results,
+                source="document_reassignment",
+            )
+    return {"updated": True, "upload_id": upload_id, "profile_id": body.profile_id}
 
 
 # ── GET /documents/{upload_id} ────────────────────────────────────────────────
@@ -504,3 +661,44 @@ def _parse_optional_uuid(value: str | None) -> uuid.UUID | None:
         return uuid.UUID(value)
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid profile_id format")
+
+
+async def _document_notable_results(conn, upload_id: uuid.UUID) -> list[str]:
+    values = await conn.fetch(
+        """
+        SELECT value_name, value_raw, unit
+        FROM extracted_health_values
+        WHERE upload_log_id = $1 AND is_abnormal = TRUE
+        """,
+        upload_id,
+    )
+    findings = await conn.fetch(
+        """
+        SELECT finding
+        FROM document_findings
+        WHERE upload_log_id = $1 AND is_abnormal = TRUE
+        """,
+        upload_id,
+    )
+    results = [
+        " ".join(
+            part for part in (
+                row["value_name"],
+                str(row["value_raw"]),
+                row["unit"],
+                "(outside reference range)",
+            ) if part
+        )
+        for row in values
+    ]
+    results.extend(row["finding"] for row in findings)
+    return results
+
+
+def _json_list(value) -> list[str]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+    return [str(item) for item in value] if isinstance(value, list) else []

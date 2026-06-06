@@ -1,6 +1,6 @@
 # UI/UX Design Specification: HealthNav Frontend
 
-**Document Version:** 1.3.0
+**Document Version:** 1.4.0
 **Project:** HealthNav — Symptom Investigation & Doctor Prep Assistant
 **Stack:** React (Vite), Tailwind CSS, Zustand, Custom Hooks (FastAPI Backend)
 
@@ -183,6 +183,64 @@ The typographic hierarchy mimics a premium printed publication.
 * **Layout:** Centered modal-style card on `bg-warm-surface`.
 * **Content:** Non-accusatory copy explaining why the AI halted the investigation.
 * **Action:** Single primary button to "Restart Investigation".
+
+### Screen 6: First-Login Profile Setup (`<ProfileOnboardingGate />`)
+* **Trigger:** The first authenticated entry into any product surface, including the
+  investigation route, dashboard, chat, upload, or family directory.
+* **Required core fields:** Full name, date of birth, and sex recorded at birth.
+  Relationship is fixed to `self`.
+* **Optional identity fields:** Alternate names used on records and stable health
+  context. These are available for every family profile as well.
+* **Layout:** Calm editorial setup page, not a wizard. One form, visible purpose,
+  no progress theatre.
+* **Behavior:** Authenticated product screens remain behind the setup surface until
+  the main profile has the required core fields.
+
+### Screen 7: Family Health Directory (`<ProfileScreen />`)
+* **Purpose:** Add, edit, maintain, and delete independent health profiles for the
+  account holder and relatives.
+* **Relationships:** Self, mother, father, wife, husband, spouse/partner, son,
+  daughter, child, brother, sister, sibling, grandmother, grandfather, and other.
+* **Profile fields:** Name, relationship to the account holder, date of birth, sex
+  recorded at birth, alternate record names, and stable health context.
+* **Directory rows:** Show age and counts for documents, doctor briefs, and chats.
+* **Hierarchy:** Group profiles as parents/grandparents, account holder/partner,
+  children, and siblings/extended family. Every person opens a dedicated viewer.
+* **Deletion:** The self profile cannot be deleted. Deleting another profile requires
+  a destructive confirmation showing the number of linked records and deletes that
+  profile's health artifacts transactionally.
+* **Zero-touch creation:** Natural references such as "my father" may create a
+  missing relationship profile automatically. Extracted patient names may name a
+  generic profile or create a new profile.
+
+### Screen 8: Profile Viewer (`<ProfileDetailScreen />`)
+* Shows identity, age, sex, stable notes, compact health memory, record counts,
+  recent documents, and doctor briefs for one person.
+* Primary actions are "Start investigation", "Chat about [name]", and "Upload a
+  document". Each destination receives the profile ID and opens preselected.
+* The viewer never mixes records from another profile. Family history remains
+  available to agents through the cross-profile reasoning rules.
+
+### 5.8 Profile-Aware Document Assignment
+* Every uploaded document has exactly one subject profile.
+* Patient names are matched against profile names and aliases.
+* A high-confidence match overrides an incorrect manually selected profile before
+  values, findings, and memory are persisted.
+* Generic profiles such as "Me" or "Mother" may be renamed from a matched report.
+* An unmatched patient name creates an independent profile automatically.
+* The upload result states where the document was filed and exposes a correction
+  selector. Reassignment moves values, findings, and document-derived memory.
+
+### 5.9 Cross-Profile Interaction Rules
+* A conversation or investigation has one primary subject profile.
+* Explicit references to another profile load that person's detailed memory.
+* All other family profiles contribute compact family-history summaries only.
+* A fact stated about one unambiguously resolved person updates only that person's
+  memory. Ambiguous multi-person statements are not written to any profile.
+* Relatives' symptoms, tests, medicines, and diagnoses must never be merged into
+  the primary subject's history.
+* Family history may produce age- and context-aware questions or screening
+  considerations, always naming the relative that supplies the evidence.
 
 ### Screen 6: Loading Screen (`<LoadingScreen />`)
 * **Layout:** Centered, focused view with ample vertical whitespace.

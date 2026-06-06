@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAuth, useUser } from '@clerk/clerk-react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   ArrowRight,
   Check,
@@ -35,8 +35,16 @@ export default function SymptomInput() {
   const setInvestigationDepth = useInvestigationStore((s) => s.setInvestigationDepth)
   const selectedProfileId = useInvestigationStore((s) => s.selectedProfileId)
   const setSelectedProfileId = useInvestigationStore((s) => s.setSelectedProfileId)
+  const [searchParams] = useSearchParams()
   const { investigate } = useInvestigation()
   const canSubmit = text.trim().length >= MIN_CHARS
+
+  useEffect(() => {
+    const requestedProfile = searchParams.get('profile')
+    if (requestedProfile && requestedProfile !== selectedProfileId) {
+      setSelectedProfileId(requestedProfile)
+    }
+  }, [searchParams, selectedProfileId, setSelectedProfileId])
 
   function handleSubmit(e) {
     e.preventDefault()

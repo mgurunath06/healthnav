@@ -203,13 +203,19 @@ class DeepDiveAgent:
 
 
 def _personal_context_section(context: dict | None) -> str:
-    if not context or not context.get("summary"):
+    if not context:
         return ""
+    summary = context.get("summary") or "No prior profile-specific summary."
     return (
         "\n\nRelevant personal health memory (historical context, not a diagnosis):\n"
-        f"{context['summary']}\n"
+        f"Subject profile: {context.get('profile') or {}}\n"
+        f"{summary}\n"
+        f"Family history summaries: {context.get('family_history') or []}\n"
+        f"Family-risk considerations: {context.get('family_risk_considerations') or []}\n"
         f"Current setting: {context.get('current_context') or {}}\n"
         "Use this to avoid repeated questions and ask about meaningful changes or recurring patterns. "
+        "Keep relatives' findings separate from the subject. Use them only to ask a relevant "
+        "family-history or screening question, naming the relationship that supports it. "
         "The next question should be explicitly personalised when the memory contains relevant context. "
         "Do not assume an old concern explains the current symptom. Mention common temporal or "
         "location patterns only when at least two dated episodes support them. Require at least "

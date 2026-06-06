@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth, useUser } from '@clerk/clerk-react'
 import { Link } from 'react-router-dom'
-import { ArrowRight, ChatCircleText, FileArrowUp, FolderOpen, NotePencil } from '@phosphor-icons/react'
+import { ArrowRight, ChatCircleText, FileArrowUp, FolderOpen, NotePencil, UsersThree } from '@phosphor-icons/react'
 import Header from './Header'
 import { apiFetch } from '../lib/api'
 
@@ -65,7 +65,7 @@ export default function PremiumDashboard() {
           </Link>
         </section>
 
-        <section className="animate-fade-in-up-2 mt-8 grid gap-5 md:grid-cols-3">
+        <section className="animate-fade-in-up-2 mt-8 grid gap-5 md:grid-cols-2 lg:grid-cols-4">
           <ActionTile
             to="/"
             icon={<NotePencil size={25} weight="light" />}
@@ -89,6 +89,14 @@ export default function PremiumDashboard() {
             title="Add a health document"
             body="Bring test results and reports into your history."
             tone="marigold"
+          />
+          <ActionTile
+            to="/profile"
+            icon={<UsersThree size={25} weight="light" />}
+            index="04"
+            title="Family profiles"
+            body="Maintain separate histories with shared family context."
+            tone="sage"
           />
         </section>
 
@@ -122,6 +130,7 @@ function ActionTile({ to, icon, index, title, body, tone }) {
     accent: { accent: '#b95538', icon: 'text-accent' },
     plum: { accent: '#76556c', icon: 'text-plum' },
     marigold: { accent: '#b47a1d', icon: 'text-marigold' },
+    sage: { accent: '#667f60', icon: 'text-sage' },
   }
   const palette = tones[tone]
   return (

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@clerk/clerk-react'
 import Header from './Header'
 
@@ -9,7 +9,8 @@ import { apiFetch } from '../lib/api'
 
 export default function ChatScreen() {
   const { getToken } = useAuth()
-  const [profileId, setProfileId] = useState('')
+  const [searchParams] = useSearchParams()
+  const [profileId, setProfileId] = useState(searchParams.get('profile') ?? '')
   const [conversations, setConversations] = useState([])
   const [conversationId, setConversationId] = useState(null)
   const [messages, setMessages] = useState([])

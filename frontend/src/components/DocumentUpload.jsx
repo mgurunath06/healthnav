@@ -1,5 +1,6 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth, useUser } from '@clerk/clerk-react'
+import { useSearchParams } from 'react-router-dom'
 import { API_BASE } from '../lib/api'
 import ProfileSelector from './ProfileSelector'
 
@@ -18,12 +19,13 @@ const DOC_TYPES = [
 export default function DocumentUpload() {
   const { getToken } = useAuth()
   const { user } = useUser()
+  const [searchParams] = useSearchParams()
   const fileInputRef = useRef(null)
 
   const [phase, setPhase]       = useState('idle')  // idle | disclosure_modal | uploading | result
   const [file, setFile]         = useState(null)
   const [docType, setDocType]   = useState('')
-  const [profileId, setProfileId] = useState('')
+  const [profileId, setProfileId] = useState(searchParams.get('profile') ?? '')
   const [fileError, setFileError] = useState('')
   const [result, setResult]     = useState(null)
   const [duplicate, setDuplicate] = useState(null)
@@ -345,6 +347,9 @@ function ResultView({ result, user, onReset }) {
         </div>
       ) : (
         <div className="space-y-4">
+          {result.assigned_profile_id && (
+            <DocumentAssignment result={result} />
+          )}
 
           {/* Summary */}
           <div className="rounded-xl bg-warm-elevated border border-warm-border px-5 py-4 space-y-1.5">
@@ -528,6 +533,61 @@ function ResultView({ result, user, onReset }) {
       >
         Upload another document
       </button>
+    </div>
+  )
+}
+
+function DocumentAssignment({ result }) {
+  const { getToken } = useAuth()
+  const [profiles, setProfiles] = useState([])
+  const [profileId, setProfileId] = useState(result.assigned_profile_id)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    async function load() {
+      const token = await getToken()
+      const response = await fetch(`${API_BASE}/profiles`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const rows = await response.json()
+      if (active && response.ok) setProfiles(rows)
+    }
+    load().catch(() => {})
+    return () => { active = false }
+  }, [getToken])
+
+  async function reassign(next) {
+    setProfileId(next)
+    setSaved(false)
+    const token = await getToken()
+    const response = await fetch(`${API_BASE}/documents/${result.upload_id}/profile`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ profile_id: next }),
+    })
+    if (response.ok) setSaved(true)
+  }
+
+  return (
+    <div className="rounded-xl border border-sage/30 bg-sage/10 px-5 py-4">
+      <p className="font-mono text-xs uppercase tracking-widest text-sage">Filed automatically</p>
+      <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="font-sans text-sm text-warm-off-white">
+          Patient details matched <strong>{result.assigned_profile_name}</strong>.
+          {result.subject_match_status === 'profile_created' && ' A new profile was created from the report.'}
+          {result.subject_match_status === 'reassigned' && ' The selected profile was corrected using the patient name.'}
+        </p>
+        {profiles.length > 1 && (
+          <select value={profileId} onChange={(event) => reassign(event.target.value)} className="profile-input sm:max-w-52">
+            {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.display_name}</option>)}
+          </select>
+        )}
+      </div>
+      {saved && <p className="mt-2 font-sans text-xs text-sage">Profile assignment updated.</p>}
     </div>
   )
 }

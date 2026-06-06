@@ -269,12 +269,20 @@ class AssemblerAgent:
             f"Card detail instruction: {_DEPTH_CARD_GUIDANCE[inp.investigation_depth]}",
         ]
         sections.append(f"Agents run: {', '.join(inp.agents_run)}")
-        if inp.personal_context and inp.personal_context.get("summary"):
+        if inp.personal_context:
             sections.append(
                 "Relevant personal health memory (context only; do not diagnose from it):\n"
-                + inp.personal_context["summary"]
+                + (inp.personal_context.get("summary") or "No prior profile-specific summary.")
+                + "\nSubject profile: "
+                + str(inp.personal_context.get("profile") or {})
+                + "\nFamily history summaries: "
+                + str(inp.personal_context.get("family_history") or [])
+                + "\nFamily-risk considerations: "
+                + str(inp.personal_context.get("family_risk_considerations") or [])
                 + "\nCurrent setting: "
                 + str(inp.personal_context.get("current_context") or {})
+                + "\nKeep relatives' health facts separate. Refer to family history only "
+                "when it changes a useful doctor question or screening discussion."
             )
 
         if inp.triage_output:

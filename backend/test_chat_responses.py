@@ -85,3 +85,14 @@ class ChatResponseTests(TestCase):
                 "or tension headache. Migraine is one possibility because of light sensitivity."
             )
         )
+
+    def test_report_summary_with_clinical_possibilities_is_useful(self):
+        self.assertFalse(
+            _is_unhelpful_refusal(
+                "Documented in your records: the February 24, 2026 echocardiogram "
+                "describes mild concentric LV hypertrophy and Grade I diastolic "
+                "dysfunction. These findings may be consistent with effects of "
+                "long-standing blood pressure, but the available evidence does not "
+                "establish the cause."
+            )
+        )

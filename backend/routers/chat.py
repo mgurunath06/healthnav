@@ -287,11 +287,10 @@ async def _build_context(conn, user_id: str, profile_id: uuid.UUID | None) -> di
             OR ($3::BOOLEAN AND ev.profile_id IS NULL)
           )
           AND (dul.is_deleted = FALSE OR ev.upload_log_id IS NULL)
-          AND (ev.recorded_date IS NULL OR ev.recorded_date >= CURRENT_DATE - INTERVAL '90 days')
         ORDER BY ev.is_abnormal DESC NULLS LAST,
                  ev.recorded_date DESC NULLS LAST,
                  ev.created_at DESC
-        LIMIT 15
+        LIMIT 30
         """,
         user_id,
         profile_id,
@@ -312,7 +311,7 @@ async def _build_context(conn, user_id: str, profile_id: uuid.UUID | None) -> di
         ORDER BY df.is_abnormal DESC NULLS LAST,
                  df.recorded_date DESC NULLS LAST,
                  df.created_at DESC
-        LIMIT 10
+        LIMIT 25
         """,
         user_id,
         profile_id,
@@ -397,12 +396,21 @@ async def _generate_reply(
         "The interface displays a medical disclaimer separately, so never repeat a "
         "boilerplate disclaimer in the reply.\n\n"
         "When asked what condition the person may have, provide a useful non-diagnostic "
-        "differential instead of refusing. Clearly separate: (1) the most plausible "
-        "possibilities, ranked only when the supplied evidence supports ranking; "
-        "(2) the specific personal history, symptoms, dates, and results supporting each; "
-        "(3) evidence that does not fit or information still needed; and (4) the appropriate "
-        "next clinical step and any urgent warning signs. Use language such as 'could be "
+        "record synthesis and differential instead of refusing or merely paraphrasing one "
+        "report. Review every supplied context category before answering. Clearly separate: "
+        "(1) 'Documented in your records' for diagnoses or findings explicitly written in "
+        "reports, preserving the report date and severity; (2) 'What these findings may point "
+        "to' for plausible clinical explanations, ranked only when the combined evidence "
+        "supports ranking; (3) 'Patterns across your history' connecting repeated symptoms, "
+        "results, dates, locations, and prior investigations; (4) evidence that does not fit "
+        "or information still needed; and (5) prioritized next clinical steps and urgent "
+        "warning signs. Use language such as 'could be "
         "consistent with', 'one possibility is', and 'this does not establish a diagnosis'. "
+        "Never convert an imaging estimate or report abbreviation into a newly confirmed "
+        "diagnosis. For example, preserve wording such as 'the report describes mild PH with "
+        "an estimated pressure of 36 mmHg' and note that interpretation depends on the full "
+        "echocardiogram and clinical context. Do not end with only 'ask your doctor'; name "
+        "the specialty, question, comparison, examination, or test that would clarify it. "
         "If the records are insufficient, say exactly what is known and what would distinguish "
         "the possibilities. For medication or dosage requests, do not provide instructions; "
         "explain what a clinician or pharmacist needs to assess.\n\n"

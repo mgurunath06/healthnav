@@ -14,6 +14,9 @@ import { useInvestigation } from '../hooks/useInvestigation'
 import { useInvestigationStore } from '../store/useInvestigationStore'
 import Header from './Header'
 import ProfileSelector from './ProfileSelector'
+import ProfileCompletionPrompt from './ProfileCompletionPrompt'
+import { useSelfProfile } from '../hooks/useSelfProfile'
+import { isProfileComplete } from '../lib/profileCompletion'
 
 const MIN_CHARS = 10
 const MAX_CHARS = 2000
@@ -26,7 +29,7 @@ const DEPTH_OPTIONS = [
   { level: 5, label: 'Comprehensive', detail: 'Up to 6 questions' },
 ]
 
-export default function SymptomInput() {
+export default function SymptomInput({ memberMode = false }) {
   const { isSignedIn } = useAuth()
   const { user } = useUser()
   const [text, setText] = useState('')
@@ -37,7 +40,19 @@ export default function SymptomInput() {
   const setSelectedProfileId = useInvestigationStore((s) => s.setSelectedProfileId)
   const [searchParams] = useSearchParams()
   const { investigate } = useInvestigation()
+  const { profile, saveProfile } = useSelfProfile()
+  const [profilePromptDismissed, setProfilePromptDismissed] = useState(false)
   const canSubmit = text.trim().length >= MIN_CHARS
+  const profilePromptKey = user?.id ? `healthnav:profile-prompt-seen:${user.id}` : null
+  const showProfileSetup = Boolean(
+    memberMode
+    && isSignedIn
+    && profile
+    && !isProfileComplete(profile)
+    && !profilePromptDismissed
+    && profilePromptKey
+    && localStorage.getItem(profilePromptKey) !== 'true'
+  )
 
   useEffect(() => {
     const requestedProfile = searchParams.get('profile')
@@ -62,8 +77,8 @@ export default function SymptomInput() {
     <InvestigationEditor
       text={text}
       canSubmit={canSubmit}
-      isSignedIn={isSignedIn}
-      investigationDepth={isSignedIn ? investigationDepth : 2}
+      isSignedIn={memberMode && isSignedIn}
+      investigationDepth={memberMode && isSignedIn ? investigationDepth : 2}
       showPaceNotice={showPaceNotice}
       onTextChange={setText}
       onKeyDown={handleKeyDown}
@@ -77,12 +92,23 @@ export default function SymptomInput() {
     <div className="app-canvas flex min-h-dvh flex-col bg-warm-charcoal">
       <Header />
 
-      {isSignedIn ? (
+      {memberMode && isSignedIn ? (
         <MemberWorkspace
           user={user}
           editor={editor}
           profileId={selectedProfileId}
           onProfileChange={setSelectedProfileId}
+          profile={profile}
+          showProfileSetup={showProfileSetup}
+          onProfileSave={async (values) => {
+            await saveProfile(values)
+            if (profilePromptKey) localStorage.setItem(profilePromptKey, 'true')
+            setProfilePromptDismissed(true)
+          }}
+          onProfileSkip={() => {
+            if (profilePromptKey) localStorage.setItem(profilePromptKey, 'true')
+            setProfilePromptDismissed(true)
+          }}
         />
       ) : (
         <GuestLanding editor={editor} />
@@ -133,7 +159,16 @@ function GuestLanding({ editor }) {
   )
 }
 
-function MemberWorkspace({ user, editor, profileId, onProfileChange }) {
+function MemberWorkspace({
+  user,
+  editor,
+  profileId,
+  onProfileChange,
+  profile,
+  showProfileSetup,
+  onProfileSave,
+  onProfileSkip,
+}) {
   const name = user?.firstName || 'there'
 
   return (
@@ -158,6 +193,14 @@ function MemberWorkspace({ user, editor, profileId, onProfileChange }) {
       </aside>
 
       <section className="animate-fade-in-up-2 py-3 lg:px-3 lg:py-0">
+        <ProfileCompletionPrompt
+          key={showProfileSetup ? 'profile-setup' : 'profile-reminder'}
+          profile={profile}
+          user={user}
+          expanded={showProfileSetup}
+          onSave={onProfileSave}
+          onSkip={onProfileSkip}
+        />
         <div className="mb-7 flex flex-col justify-between gap-4 border-b border-warm-border/70 pb-6 sm:flex-row sm:items-end">
           <div>
             <p className="eyebrow">New investigation</p>

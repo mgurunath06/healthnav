@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid'
 import { useAuth } from '@clerk/clerk-react'
 import { useInvestigationStore } from '../store/useInvestigationStore'
+import { autofillProfileFromAnswer } from '../lib/profileAutofill'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
 
@@ -74,6 +75,14 @@ export function useInvestigation() {
       question_type: question.type,   // 'yes_no' | 'single_choice' | 'multi_choice' | 'scale'
       answer_is_free_text: answerIsFreeText,
       answer: Array.isArray(answer) ? answer.join(', ') : String(answer),
+    }
+    if (isSignedIn) {
+      void autofillProfileFromAnswer({
+        question,
+        answer: item.answer,
+        selectedProfileId: store.selectedProfileId || null,
+        getToken,
+      })
     }
     store.appendFollowUp(item)
     const updatedHistory = [...store.followUpHistory, item]

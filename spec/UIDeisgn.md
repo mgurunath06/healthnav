@@ -184,9 +184,13 @@ The typographic hierarchy mimics a premium printed publication.
 * **Content:** Non-accusatory copy explaining why the AI halted the investigation.
 * **Action:** Single primary button to "Restart Investigation".
 
-### Screen 6: First-Login Profile Setup (`<ProfileOnboardingGate />`)
+### Screen 6: Progressive Profile Setup (`<ProfileCompletionPrompt />`)
 * **Trigger:** The first authenticated entry into any product surface, including the
-  investigation route, dashboard, chat, upload, or family directory.
+  first signed-in investigation as an inline, skippable panel.
+* It must never replace the public `/` landing page, dashboard, chat, upload, or
+  family directory.
+* After dismissal, render a quiet reminder above the signed-in investigation
+  editor and near the top of the dashboard until the profile is complete.
 * **Required core fields:** Full name, date of birth, and sex recorded at birth.
   Relationship is fixed to `self`.
 * **Optional identity fields:** Alternate names used on records and stable health

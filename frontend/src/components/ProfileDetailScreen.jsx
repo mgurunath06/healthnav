@@ -41,7 +41,7 @@ export default function ProfileDetailScreen() {
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
-            <Action to={`/${query}`} icon={<NotePencil size={18} />} label="Start investigation" />
+            <Action to={`/investigate${query}`} icon={<NotePencil size={18} />} label="Start investigation" />
             <Action to={`/chat${query}`} icon={<ChatCircleText size={18} />} label={`Chat about ${profile.display_name}`} />
             <Action to={`/dashboard/upload${query}`} icon={<FileArrowUp size={18} />} label="Upload a document" />
           </div>

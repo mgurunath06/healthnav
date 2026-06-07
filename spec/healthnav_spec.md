@@ -981,7 +981,8 @@ VITE_CLERK_PUBLISHABLE_KEY=pk_live_...
 
 **Auth-aware routing:**
 ```
-/           → <SymptomInput />        (free, anonymous — unchanged)
+/           → <SymptomInput />        (public landing and anonymous investigation)
+/investigate → <SymptomInput />       (gated signed-in investigation workspace)
 /result     → <PrepCard />            (free — unchanged)
 /login      → <LoginScreen />         (Clerk SignIn component)
 /dashboard  → <PremiumDashboard />    (gated — requires auth)
@@ -1003,6 +1004,15 @@ import { useAuth, useUser } from '@clerk/clerk-react'
 const { isSignedIn, getToken } = useAuth()
 const { user } = useUser()
 ```
+
+**Session persistence choice:**
+- Login shows a `Remain logged in` checkbox.
+- Checked: returning visits keep the Clerk session and open `/dashboard` until
+  explicit logout.
+- Unchecked: the current browser session may use the dashboard normally, but a
+  later browser session signs out the retained Clerk session and opens the public
+  `/` investigation page.
+- The preference contains no health data and is stored locally in the browser.
 
 **Token passing to backend:**
 ```tsx
@@ -1055,30 +1065,35 @@ CLERK_PUBLISHABLE_KEY=pk_live_...
   → Backend: extracts user_id → queries Railway Postgres
 ```
 
-### 15.5 First-time user onboarding flow
+### 15.5 Progressive profile completion
 
-Triggered on the first authenticated entry to any protected product surface. The
-frontend checks the auto-created `self` profile rather than relying solely on
-`users.onboarding_completed`.
+Authentication must never replace the public landing experience or block access
+to the dashboard.
 
-```
-Single editorial setup surface
-  Required:
-  - Full name
-  - Date of birth
-  - Sex recorded at birth
+- `/` always renders the public investigation landing page, whether signed out or signed in.
+- `/investigate` is the signed-in profile-aware investigation workspace.
+- Successful login redirects to `/dashboard`.
+- Protected product routes require authentication, but not a complete self profile.
+- On the first signed-in investigation, an incomplete self profile is shown as an
+  inline, skippable setup panel before the investigation editor.
+- If skipped, later investigation screens show a quiet reminder above the editor.
+- The dashboard shows the same non-blocking reminder until the core fields are
+  complete.
+- Profile completion remains available from the profile directory at any time.
 
-  Optional:
-  - Alternate names used on medical records
-  - Stable health context such as allergies or long-term conditions
+Core fields:
+- Full name
+- Date of birth
+- Sex recorded at birth
 
-  Relationship is fixed to "self".
-  CTA: "Create my health profile"
-```
+Optional fields:
+- Alternate names used on medical records
+- Stable health context such as allergies or long-term conditions
 
-Dashboard, chat, upload, profile, and signed-in investigation routes remain behind
-this gate until the required self-profile fields are complete. Optional location,
-notification, and condition-preference onboarding is deferred.
+When an investigation directly asks for a missing demographic field and the user
+answers explicitly, the frontend may fill that missing self-profile field after
+submission. It must not overwrite an existing value or infer profile facts from
+free-form symptom descriptions.
 
 ---
 
@@ -1830,8 +1845,17 @@ POST  /payments/cancel
 - [ ] Weather nudge fires when temp < 15°C + respiratory history + `nudge_weather = true`
 - [ ] All premium endpoints return `401` with no token, `403` with wrong user's resource
 - [ ] `GET /health` returns `tier_support: ["free", "premium"]`
-- [ ] First authenticated entry requires completion of the self profile's name,
-      date of birth, and sex before product access
+- [ ] Public URL opens the anonymous investigation page unless a remembered Clerk
+      session is active, in which case it redirects to `/dashboard`
+- [ ] Successful login opens `/dashboard`; incomplete profile data never blocks it
+- [ ] `Remain logged in` checked returns a later browser session to `/dashboard`
+- [ ] `Remain logged in` unchecked returns a later browser session to the public
+      investigation page
+- [ ] First signed-in investigation offers skippable inline profile completion
+- [ ] Later signed-in investigations and dashboard show a non-blocking reminder
+      while core profile fields remain incomplete
+- [ ] Explicit demographic answers can fill missing self-profile fields without
+      overwriting existing values
 - [ ] Upload log visible in ProfileScreen; no file content retrievable
 
 ---

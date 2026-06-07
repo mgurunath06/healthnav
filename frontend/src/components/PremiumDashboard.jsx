@@ -4,6 +4,8 @@ import { Link } from 'react-router-dom'
 import { ArrowRight, ChatCircleText, FileArrowUp, FolderOpen, NotePencil, UsersThree } from '@phosphor-icons/react'
 import Header from './Header'
 import { apiFetch } from '../lib/api'
+import ProfileCompletionPrompt from './ProfileCompletionPrompt'
+import { useSelfProfile } from '../hooks/useSelfProfile'
 
 function timeOfDay() {
   const h = new Date().getHours()
@@ -17,6 +19,7 @@ export default function PremiumDashboard() {
   const { user } = useUser()
   const [cards, setCards] = useState([])
   const [docs, setDocs] = useState([])
+  const { profile, saveProfile } = useSelfProfile()
 
   useEffect(() => {
     let active = true
@@ -46,6 +49,7 @@ export default function PremiumDashboard() {
     <div className="app-canvas min-h-dvh bg-warm-charcoal">
       <Header />
       <main className="mx-auto w-full max-w-7xl px-5 py-10 sm:px-8 lg:py-14">
+        <ProfileCompletionPrompt profile={profile} user={user} onSave={saveProfile} />
         <section className="animate-fade-in-up grid items-end gap-8 border-b border-warm-border/70 pb-10 lg:grid-cols-[1fr_auto]">
           <div>
             <p className="eyebrow">Your health desk</p>
@@ -57,7 +61,7 @@ export default function PremiumDashboard() {
             </p>
           </div>
           <Link
-            to="/"
+            to="/investigate"
             className="group flex min-w-72 items-center justify-between rounded-full bg-warm-off-white px-6 py-4 font-sans text-sm font-semibold text-warm-surface transition-all duration-500 hover:-translate-y-1 hover:bg-accent"
           >
             Start an investigation
@@ -67,7 +71,7 @@ export default function PremiumDashboard() {
 
         <section className="animate-fade-in-up-2 mt-8 grid gap-5 md:grid-cols-2 lg:grid-cols-4">
           <ActionTile
-            to="/"
+            to="/investigate"
             icon={<NotePencil size={25} weight="light" />}
             index="01"
             title="Prepare a doctor brief"

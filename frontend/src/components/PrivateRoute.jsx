@@ -1,6 +1,5 @@
 import { useAuth } from '@clerk/clerk-react'
 import { Navigate } from 'react-router-dom'
-import ProfileOnboardingGate from './ProfileOnboardingGate'
 
 export default function PrivateRoute({ children }) {
   const { isLoaded, isSignedIn } = useAuth()
@@ -15,5 +14,5 @@ export default function PrivateRoute({ children }) {
 
   if (!isSignedIn) return <Navigate to="/login" replace />
 
-  return <ProfileOnboardingGate>{children}</ProfileOnboardingGate>
+  return children
 }

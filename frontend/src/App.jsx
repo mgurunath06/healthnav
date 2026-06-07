@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom'
+import { Navigate, Routes, Route } from 'react-router-dom'
 import { useAuth } from '@clerk/clerk-react'
 import { useInvestigationStore } from './store/useInvestigationStore'
 import SymptomInput from './components/SymptomInput'
@@ -14,12 +14,11 @@ import DocumentUploadScreen from './screens/DocumentUploadScreen'
 import PrivateRoute from './components/PrivateRoute'
 import ProfileScreen from './components/ProfileScreen'
 import ChatScreen from './components/ChatScreen'
-import ProfileOnboardingGate from './components/ProfileOnboardingGate'
 import ProfileDetailScreen from './components/ProfileDetailScreen'
 import './App.css'
 
-function InvestigationFlow() {
-  const { isLoaded, isSignedIn } = useAuth()
+function InvestigationFlow({ memberMode = false }) {
+  const { isLoaded } = useAuth()
   const screen          = useInvestigationStore((s) => s.screen)
   const followUpHistory = useInvestigationStore((s) => s.followUpHistory)
   const isWizardLoading = screen === 'loading' && followUpHistory.length > 0
@@ -37,21 +36,27 @@ function InvestigationFlow() {
     )
   }
 
-  let content = <SymptomInput />
+  let content = <SymptomInput memberMode={memberMode} />
   if (screen === 'loading' && !isWizardLoading) content = <LoadingScreen />
   if (screen === 'wizard' || isWizardLoading) content = <QuestionWizard />
   if (screen === 'prep_card') content = <PrepCard />
   if (screen === 'emergency') content = <EmergencyScreen />
   if (screen === 'redirect') content = <RedirectScreen />
   if (screen === 'error') content = <ErrorScreen />
-  const flow = <div key={screen} className="route-reveal">{content}</div>
-  return isSignedIn ? <ProfileOnboardingGate>{flow}</ProfileOnboardingGate> : flow
+  return <div key={screen} className="route-reveal">{content}</div>
+}
+
+function HomeRoute() {
+  const { isLoaded, isSignedIn } = useAuth()
+  if (isLoaded && isSignedIn) return <Navigate to="/dashboard" replace />
+  return <InvestigationFlow />
 }
 
 export default function App() {
   return (
     <Routes>
-      <Route path="/"                  element={<InvestigationFlow />} />
+      <Route path="/"                  element={<HomeRoute />} />
+      <Route path="/investigate"       element={<PrivateRoute><InvestigationFlow memberMode /></PrivateRoute>} />
       <Route path="/login"             element={<LoginScreen />} />
       <Route path="/dashboard"         element={<PrivateRoute><PremiumDashboard /></PrivateRoute>} />
       <Route path="/dashboard/upload"  element={<PrivateRoute><DocumentUploadScreen /></PrivateRoute>} />

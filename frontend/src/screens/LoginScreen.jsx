@@ -1,6 +1,12 @@
+import { useState } from 'react'
 import { useAuth, SignIn } from '@clerk/clerk-react'
 import { Navigate } from 'react-router-dom'
 import Header from '../components/Header'
+import {
+  ACTIVE_BROWSER_SESSION_KEY,
+  REMAIN_LOGGED_IN_KEY,
+  shouldRemainLoggedIn,
+} from '../lib/sessionPreference'
 
 const clerkAppearance = {
   variables: {
@@ -73,8 +79,21 @@ const clerkAppearance = {
 
 export default function LoginScreen() {
   const { isLoaded, isSignedIn } = useAuth()
+  const [remainLoggedIn, setRemainLoggedIn] = useState(() => {
+    sessionStorage.setItem(ACTIVE_BROWSER_SESSION_KEY, 'true')
+    if (localStorage.getItem(REMAIN_LOGGED_IN_KEY) === null) {
+      localStorage.setItem(REMAIN_LOGGED_IN_KEY, 'false')
+    }
+    return shouldRemainLoggedIn()
+  })
 
   if (isLoaded && isSignedIn) return <Navigate to="/dashboard" replace />
+
+  function updateSessionPreference(checked) {
+    setRemainLoggedIn(checked)
+    localStorage.setItem(REMAIN_LOGGED_IN_KEY, String(checked))
+    sessionStorage.setItem(ACTIVE_BROWSER_SESSION_KEY, 'true')
+  }
 
   return (
     <div className="app-canvas min-h-dvh bg-warm-charcoal flex flex-col">
@@ -96,6 +115,21 @@ export default function LoginScreen() {
             fallbackRedirectUrl="/dashboard"
             appearance={clerkAppearance}
           />
+
+          <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-xl border border-warm-border bg-warm-surface px-4 py-3">
+            <input
+              type="checkbox"
+              checked={remainLoggedIn}
+              onChange={(event) => updateSessionPreference(event.target.checked)}
+              className="mt-0.5 size-4 accent-accent"
+            />
+            <span>
+              <span className="block font-sans text-sm text-warm-off-white">Remain logged in</span>
+              <span className="mt-1 block font-sans text-xs leading-5 text-warm-muted">
+                Keep opening HealthNav at your dashboard until you log out.
+              </span>
+            </span>
+          </label>
 
         </div>
       </main>

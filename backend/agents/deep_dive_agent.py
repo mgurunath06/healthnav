@@ -64,6 +64,8 @@ Respond ONLY with a valid JSON object — no markdown fences, no text outside th
   BAD: "How long have you had this symptom?" (generic)
   GOOD: "You said the pain is constant — does it wake you up at night, or is it only while you're awake?" (follows from the previous answer)
 - When personal health memory is supplied, each question must first account for what is already known about this person.
+  CRITICAL: Never use historical data as a substitute for investigating the CURRENT episode. Even if a user has a long history, you MUST still establish the duration, severity, frequency, and triggers of the symptoms they are reporting RIGHT NOW.
+  For high investigation depths (Level 4 and 5), you MUST complete the requested number of follow-up exchanges even if the situation seems clear from history.
   Prefer one of these personalised question strategies:
   1. CHANGE: ask how the current episode differs from a previous similar episode.
   2. RECURRENCE: ask whether a previously observed trigger, season, place, routine, or accompanying symptom is present now.

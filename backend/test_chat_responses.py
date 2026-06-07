@@ -1,4 +1,5 @@
-from unittest import TestCase
+from unittest import IsolatedAsyncioTestCase, TestCase
+from unittest.mock import AsyncMock, patch
 
 from test_support import (
     install_asyncpg_stub_if_native_import_is_blocked,
@@ -10,10 +11,12 @@ install_asyncpg_stub_if_native_import_is_blocked()
 
 from routers.chat import (
     _fallback_reply,
+    _generate_reply,
     _is_diagnostic_question,
     _is_record_summary_request,
     _is_unhelpful_summary_reply,
     _is_unhelpful_refusal,
+    _is_unhelpful_wellness_reply,
     _select_context_for_message,
     _strip_standard_disclaimer,
 )
@@ -142,6 +145,55 @@ class ChatResponseTests(TestCase):
         self.assertNotIn("could not complete", reply.lower())
         self.assertNotIn("please confirm", reply.lower())
 
+    def test_ailments_request_uses_document_conditions_not_chat_questions(self):
+        context = {
+            "health_memory": {},
+            "document_conditions": ["Diabetes mellitus", "Chronic knee pain"],
+            "document_conclusions": ["Post-operative fixation rod in right leg."],
+            "document_findings": [],
+            "extracted_health_values": [],
+            "past_prep_cards": [],
+            "recent_user_health_statements": [
+                {"content": "How should I exercise", "date": "2026-06-07"},
+            ],
+        }
+
+        reply = _fallback_reply("What ailments do I have", context)
+
+        self.assertIn("Diabetes mellitus", reply)
+        self.assertIn("Chronic knee pain", reply)
+        self.assertNotIn("How should I exercise", reply)
+        self.assertNotIn("cannot identify one condition", reply.lower())
+
+    def test_exercise_question_gets_practical_condition_aware_fallback(self):
+        context = {
+            "health_memory": {
+                "durable_facts": ["Diabetes", "Rod in right leg"],
+                "recurring_concerns": ["Knee pain", "Shoulder pain"],
+            },
+            "document_conditions": [],
+        }
+
+        reply = _fallback_reply("How should I exercise?", context)
+
+        self.assertIn("low-impact", reply)
+        self.assertIn("chair-based", reply)
+        self.assertIn("glucose", reply)
+        self.assertNotIn("cannot provide", reply.lower())
+
+    def test_detects_unhelpful_exercise_refusal(self):
+        self.assertTrue(
+            _is_unhelpful_wellness_reply(
+                "I cannot provide specific exercise instructions. It would be best to "
+                "consult with a healthcare professional or a physical therapist."
+            )
+        )
+        self.assertFalse(
+            _is_unhelpful_wellness_reply(
+                "Start with 10 minutes of low-impact walking and gentle mobility work."
+            )
+        )
+
     def test_confirmation_inherits_prior_summary_request(self):
         history = [
             {
@@ -206,3 +258,27 @@ class ChatResponseTests(TestCase):
         )
 
         self.assertEqual(20, len(selected["extracted_health_values"]))
+
+
+class ChatGenerationTests(IsolatedAsyncioTestCase):
+    async def test_record_inventory_does_not_depend_on_model(self):
+        context = {
+            "health_memory": {},
+            "document_conditions": ["Diabetes mellitus", "Chronic knee pain"],
+            "document_conclusions": [],
+            "document_findings": [],
+            "extracted_health_values": [],
+            "past_prep_cards": [],
+        }
+
+        with patch("routers.chat._client.chat", new=AsyncMock()) as model_call:
+            reply, sources, updates = await _generate_reply(
+                "What ailments do I have?",
+                context,
+                [],
+            )
+
+        model_call.assert_not_awaited()
+        self.assertIn("Diabetes mellitus", reply)
+        self.assertIn("document_findings", sources)
+        self.assertEqual([], updates["durable_facts"])

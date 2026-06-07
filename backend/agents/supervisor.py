@@ -812,12 +812,19 @@ def _findings_sufficient(
     investigation_depth: int = 3,
 ) -> bool:
     """True when core clinical dimensions are covered — safe to stop asking."""
-    if len(follow_up_history) < _FOLLOWUP_MINIMUMS.get(investigation_depth, 2):
+    min_req = _FOLLOWUP_MINIMUMS.get(investigation_depth, 2)
+    if len(follow_up_history) < min_req:
         return False
+
+    def is_meaningful(val: str | None) -> bool:
+        if not val: return False
+        low = val.lower()
+        return not any(x in low for x in ("unknown", "not specified", "not mentioned", "not provided"))
+
     return (
-        findings.duration is not None
-        and findings.severity is not None
-        and findings.frequency is not None
+        is_meaningful(findings.duration)
+        and is_meaningful(findings.severity)
+        and is_meaningful(findings.frequency)
         and len(findings.triggers) > 0
     )
 

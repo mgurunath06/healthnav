@@ -350,6 +350,24 @@ async def _build_context(
         profile_id,
         include_unassigned,
     )
+    document_summaries = await conn.fetch(
+        """
+        SELECT conditions_mentioned, conclusions, uploaded_at
+        FROM document_upload_logs
+        WHERE user_id = $1
+          AND (
+            $2::UUID IS NULL
+            OR profile_id = $2
+            OR ($3::BOOLEAN AND profile_id IS NULL)
+          )
+          AND is_deleted = FALSE
+        ORDER BY uploaded_at DESC
+        LIMIT 20
+        """,
+        user_id,
+        profile_id,
+        include_unassigned,
+    )
     cards = await conn.fetch(
         """
         SELECT symptom_description, prep_card, created_at
@@ -414,6 +432,16 @@ async def _build_context(
         "health_memory": memory,
         "extracted_health_values": [dict(v) for v in values],
         "document_findings": [dict(f) for f in findings],
+        "document_conditions": _unique_text([
+            item
+            for row in document_summaries
+            for item in _json_list(row["conditions_mentioned"])
+        ], limit=30),
+        "document_conclusions": _unique_text([
+            item
+            for row in document_summaries
+            for item in _json_list(row["conclusions"])
+        ], limit=30),
         "past_prep_cards": [
             {
                 "symptom_description": c["symptom_description"],
@@ -452,6 +480,11 @@ async def _generate_reply(
     history: list,
 ) -> tuple[str, list[str], dict[str, list[str]]]:
     summary_request = _is_record_summary_request(message, history)
+    if summary_request:
+        record_summary = _record_summary_reply(context)
+        if record_summary:
+            return record_summary, _context_sources(context), _empty_memory_updates()
+
     prompt_context = _select_context_for_message(message, context, summary_request=summary_request)
     prompt = (
         "You are HealthNav's clinically informed health companion. Respond with the "
@@ -480,6 +513,12 @@ async def _generate_reply(
         "If the records are insufficient, say exactly what is known and what would distinguish "
         "the possibilities. For medication or dosage requests, do not provide instructions; "
         "explain what a clinician or pharmacist needs to assess.\n\n"
+        "For general wellness questions such as how to exercise, eat, sleep, or build a "
+        "routine, give practical educational suggestions immediately. Use the person's "
+        "documented conditions to adapt intensity, movement choice, and safety cautions. "
+        "Do not refuse merely because advice should be personalized. Distinguish general "
+        "guidance from an individualized rehabilitation or treatment prescription, and "
+        "include concrete stop signs or clinician-clearance reasons when the records support them.\n\n"
         "If the user asks for all conditions, a summary of all records, or confirms a prior "
         "offer to summarize, answer immediately with the complete useful summary available. "
         "Do not ask which condition, ask for confirmation, or repeat the offer. Organize the "
@@ -538,6 +577,7 @@ async def _generate_reply(
     needs_constrained_retry = (
         (_is_diagnostic_question(message) and _is_unhelpful_refusal(reply, context))
         or (summary_request and _is_unhelpful_summary_reply(reply))
+        or (_is_wellness_question(message) and _is_unhelpful_wellness_reply(reply))
     )
     if needs_constrained_retry:
         retry_messages = [
@@ -552,7 +592,9 @@ async def _generate_reply(
                     "documented conditions/findings and important results directly, distinguishing "
                     "recorded facts from possible interpretations. Otherwise provide an educational "
                     "differential with evidence for and against, missing information, red flags, "
-                    "and the next clinical step. Return the required JSON only."
+                    "and the next clinical step. For exercise or other wellness guidance, provide "
+                    "practical general suggestions, condition-aware modifications, and stop signs "
+                    "instead of refusing. Return the required JSON only."
                 ),
             },
         ]
@@ -572,6 +614,7 @@ async def _generate_reply(
                 retry_reply
                 and not _is_unhelpful_refusal(retry_reply, context)
                 and not (summary_request and _is_unhelpful_summary_reply(retry_reply))
+                and not (_is_wellness_question(message) and _is_unhelpful_wellness_reply(retry_reply))
             ):
                 return (
                     retry_reply,
@@ -681,6 +724,8 @@ def _fallback_reply(message: str, context: dict, history: list | None = None) ->
             "makes it better or worse, and any associated symptoms. I can then outline a "
             "non-diagnostic differential and the warning signs that need prompt medical care."
         )
+    if _is_wellness_question(message):
+        return _wellness_fallback_reply(message, context)
     if has_records:
         return (
             "I could not complete a full review of your records just now. "
@@ -690,6 +735,91 @@ def _fallback_reply(message: str, context: dict, history: list | None = None) ->
         "I could not complete the full response just now. "
         "I can still help with general wellness routines or prepare questions for your doctor."
     )
+
+
+def _wellness_fallback_reply(message: str, context: dict) -> str:
+    evidence = _unique_text([
+        *((context.get("health_memory") or {}).get("durable_facts") or []),
+        *(context.get("document_conditions") or []),
+        *((context.get("health_memory") or {}).get("recurring_concerns") or []),
+    ], limit=5)
+    lowered_evidence = " ".join(evidence).casefold()
+
+    suggestions = [
+        "Start with 10-15 minutes of comfortable walking or another low-impact activity, 4-5 days a week, and increase duration gradually.",
+        "Add gentle mobility work and two light strength sessions each week, using movements that do not increase joint pain.",
+        "Use a pace where you can still speak in full sentences, with a warm-up and cool-down of about 5 minutes each.",
+    ]
+    modifications = []
+    if any(term in lowered_evidence for term in ("knee", "leg", "rod", "hip", "joint")):
+        modifications.append(
+            "Because the records mention lower-limb or joint concerns, favor level walking, a stationary cycle, or chair-based exercise over running and jumping."
+        )
+    if any(term in lowered_evidence for term in ("shoulder", "arm")):
+        modifications.append(
+            "Keep upper-body movements below the pain threshold and avoid heavy overhead lifting until shoulder function is assessed."
+        )
+    if any(term in lowered_evidence for term in ("diabetes", "glucose", "hba1c")):
+        modifications.append(
+            "If diabetes or elevated glucose is documented, monitor for dizziness, sweating, shakiness, or unusual weakness and follow the clinician's glucose-management advice around activity."
+        )
+
+    record_note = (
+        "I adapted this to the recorded context: " + "; ".join(evidence) + "."
+        if evidence else
+        "I do not have enough recorded mobility or cardiovascular detail to tailor intensity further."
+    )
+    return "\n\n".join([
+        "A practical starting routine:",
+        "\n".join(f"- {item}" for item in suggestions),
+        *modifications,
+        record_note,
+        "Stop and seek prompt medical help for chest pain, fainting, severe breathlessness, or sudden weakness. Stop the activity and arrange clinical review if pain, swelling, or instability clearly worsens.",
+    ])
+
+
+def _is_wellness_question(message: str) -> bool:
+    lowered = message.casefold()
+    return any(
+        phrase in lowered
+        for phrase in (
+            "how should i exercise",
+            "how can i exercise",
+            "what exercise",
+            "exercise routine",
+            "workout",
+            "physical activity",
+            "how should i eat",
+            "diet routine",
+            "sleep routine",
+        )
+    )
+
+
+def _is_unhelpful_wellness_reply(reply: str) -> bool:
+    lowered = " ".join(reply.casefold().split())
+    refusal = any(
+        phrase in lowered
+        for phrase in (
+            "cannot provide specific exercise",
+            "can't provide specific exercise",
+            "cannot provide exercise",
+            "consult with a healthcare professional or a physical therapist",
+            "best to consult with a healthcare professional",
+        )
+    )
+    practical = any(
+        phrase in lowered
+        for phrase in (
+            "walking",
+            "low-impact",
+            "mobility",
+            "strength",
+            "minutes",
+            "start with",
+        )
+    )
+    return refusal and not practical
 
 
 def _is_record_summary_request(message: str, history: list | None = None) -> bool:
@@ -708,6 +838,11 @@ def _is_record_summary_request(message: str, history: list | None = None) -> boo
         "all her conditions",
         "all his conditions",
         "all my conditions",
+        "what ailments do i have",
+        "what conditions do i have",
+        "what illnesses do i have",
+        "list my ailments",
+        "list my conditions",
     )
     if any(marker in lowered for marker in direct_markers):
         return True
@@ -756,6 +891,8 @@ def _record_summary_reply(context: dict) -> str:
     documented = _unique_text([
         *(memory.get("durable_facts") or []),
         *(memory.get("notable_results") or []),
+        *(context.get("document_conditions") or []),
+        *(context.get("document_conclusions") or []),
         *[
             finding.get("finding")
             for finding in (context.get("document_findings") or [])
@@ -916,6 +1053,20 @@ def _fallback_evidence(context: dict) -> str:
     if summary:
         items.append(summary[:350])
 
+    for fact in [
+        *(memory.get("durable_facts") or []),
+        *(context.get("document_conditions") or []),
+        *(memory.get("notable_results") or []),
+        *(context.get("document_conclusions") or []),
+    ][:5]:
+        if str(fact).strip():
+            items.append(str(fact).strip()[:200])
+
+    for finding in (context.get("document_findings") or [])[:3]:
+        text = str(finding.get("finding") or "").strip()
+        if text:
+            items.append(text[:200])
+
     for card in (context.get("past_prep_cards") or [])[:2]:
         symptom = str(card.get("symptom_description") or "").strip()
         date = str(card.get("date") or "").strip()
@@ -928,12 +1079,6 @@ def _fallback_evidence(context: dict) -> str:
         unit = str(value.get("unit") or "").strip()
         if name and raw:
             items.append(" ".join(part for part in (name, raw, unit) if part))
-
-    for statement in (context.get("recent_user_health_statements") or [])[:3]:
-        content = str(statement.get("content") or "").strip()
-        date = str(statement.get("date") or "").strip()
-        if content:
-            items.append(f"{content[:180]} ({date})" if date else content[:180])
 
     return "; ".join(items[:5])
 
@@ -1023,6 +1168,8 @@ def _context_sources(context: dict) -> list[str]:
         sources.append("health_values")
     if context.get("document_findings"):
         sources.append("document_findings")
+    if context.get("document_conditions") or context.get("document_conclusions"):
+        sources.append("document_findings")
     if context.get("past_prep_cards"):
         sources.append("prep_cards")
     if context.get("recent_user_health_statements"):
@@ -1042,6 +1189,8 @@ def _context_has_evidence(context: dict) -> bool:
         or memory.get("recent_episodes")
         or context.get("extracted_health_values")
         or context.get("document_findings")
+        or context.get("document_conditions")
+        or context.get("document_conclusions")
         or context.get("past_prep_cards")
         or context.get("recent_user_health_statements")
     )
@@ -1114,6 +1263,18 @@ def _json_obj(value) -> dict:
     if isinstance(value, str):
         return json.loads(value)
     return {}
+
+
+def _json_list(value) -> list:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+        return parsed if isinstance(parsed, list) else []
+    return []
 
 
 def _parse_uuid(value: str) -> uuid.UUID:

@@ -141,16 +141,9 @@ class Supervisor:
             ((deep_dive is not None and deep_dive.needs_followup) or below_minimum)
             and len(follow_up_history) < min(_MAX_FOLLOWUP, max_followups)
         ):
-            # Force follow-up if agent wants it or we are below minimum.
-            # Only Level 1-3 can stop early if findings are sufficient.
-            force_minimum = investigation_depth >= 4
-            insufficient = deep_dive is None or not _findings_sufficient(
-                deep_dive.structured_findings if deep_dive else None,
-                follow_up_history,
-                investigation_depth
-            )
-            
-            if (deep_dive is not None and deep_dive.needs_followup) or (below_minimum and (force_minimum or insufficient)):
+            # Minimum exchanges are always enforced — "sufficient findings" never
+            # overrides the per-level floor. _FOLLOWUP_MINIMUMS is the contract.
+            if (deep_dive is not None and deep_dive.needs_followup) or below_minimum:
                 deduped = _dedup_questions(
                     deep_dive.followup_questions if deep_dive is not None else [],
                     follow_up_history,
@@ -809,29 +802,6 @@ def _last_answer_was_selection(follow_up_history: list[dict]) -> bool:
     return (
         latest.get("question_type") in _SELECTION_TYPES
         and not latest.get("answer_is_free_text", False)
-    )
-
-
-def _findings_sufficient(
-    findings,
-    follow_up_history: list[dict],
-    investigation_depth: int = 3,
-) -> bool:
-    """True when core clinical dimensions are covered — safe to stop asking."""
-    min_req = _FOLLOWUP_MINIMUMS.get(investigation_depth, 2)
-    if len(follow_up_history) < min_req:
-        return False
-
-    def is_meaningful(val: str | None) -> bool:
-        if not val: return False
-        low = val.lower()
-        return not any(x in low for x in ("unknown", "not specified", "not mentioned", "not provided"))
-
-    return (
-        is_meaningful(findings.duration)
-        and is_meaningful(findings.severity)
-        and is_meaningful(findings.frequency)
-        and len(findings.triggers) > 0
     )
 
 

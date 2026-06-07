@@ -1,25 +1,19 @@
-import { useEffect, useState } from 'react'
 import { useInvestigationStore } from '../store/useInvestigationStore'
 import Header from './Header'
 
 const STAGES = [
-  ['Screening', 'Checking urgency and safety'],
-  ['Listening', 'Finding the details that matter'],
-  ['Structuring', 'Organising the clinical picture'],
-  ['Preparing', 'Writing your doctor brief'],
+  ['Screening', 'Checking urgency and safety', ['screening', 'guardrail', 'triage', 'red_flag_detector']],
+  ['Listening', 'Finding the details that matter', ['deep_dive']],
+  ['Structuring', 'Organising the clinical picture', ['lifestyle']],
+  ['Preparing', 'Writing your doctor brief', ['assembler']],
 ]
 
 export default function LoadingScreen() {
   const followUpHistory = useInvestigationStore((s) => s.followUpHistory)
-  const [currentStage, setCurrentStage] = useState(0)
+  const agentTrace = useInvestigationStore((s) => s.agentTrace)
+  const currentAgent = useInvestigationStore((s) => s.currentAgent)
   const isFollowUp = followUpHistory.length > 0
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      setCurrentStage((i) => Math.min(i + 1, STAGES.length - 1))
-    }, 2500)
-    return () => clearInterval(id)
-  }, [])
+  const currentStage = stageIndexFor(currentAgent, agentTrace)
 
   return (
     <div className="app-canvas flex min-h-dvh flex-col bg-warm-charcoal">
@@ -41,8 +35,9 @@ export default function LoadingScreen() {
             <span className="font-mono text-xs text-marigold">0{currentStage + 1} / 04</span>
           </div>
           <div>
-            {STAGES.map(([label, detail], i) => {
-              const done = i < currentStage
+            {STAGES.map(([label, detail, agents], i) => {
+              const matching = agentTrace.filter((item) => agents.includes(item.agent))
+              const done = matching.length > 0 && matching.every((item) => item.status !== 'pending')
               const current = i === currentStage
               return (
                 <div key={label} className="grid grid-cols-[2.5rem_1fr] gap-4">
@@ -71,4 +66,14 @@ export default function LoadingScreen() {
       </main>
     </div>
   )
+}
+
+function stageIndexFor(currentAgent, trace) {
+  const active = currentAgent || [...trace].reverse().find((item) => item.status === 'pending')?.agent
+  const activeIndex = STAGES.findIndex(([, , agents]) => agents.includes(active))
+  if (activeIndex >= 0) return activeIndex
+
+  const latest = [...trace].reverse().find((item) => item.agent)?.agent
+  const latestIndex = STAGES.findIndex(([, , agents]) => agents.includes(latest))
+  return latestIndex >= 0 ? latestIndex : 0
 }

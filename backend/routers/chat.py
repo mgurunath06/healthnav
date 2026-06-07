@@ -451,6 +451,8 @@ async def _generate_reply(
     context: dict,
     history: list,
 ) -> tuple[str, list[str], dict[str, list[str]]]:
+    summary_request = _is_record_summary_request(message, history)
+    prompt_context = _select_context_for_message(message, context, summary_request=summary_request)
     prompt = (
         "You are HealthNav's clinically informed health companion. Respond with the "
         "clarity and structured reasoning of a careful medical professional. Use the "
@@ -478,6 +480,12 @@ async def _generate_reply(
         "If the records are insufficient, say exactly what is known and what would distinguish "
         "the possibilities. For medication or dosage requests, do not provide instructions; "
         "explain what a clinician or pharmacist needs to assess.\n\n"
+        "If the user asks for all conditions, a summary of all records, or confirms a prior "
+        "offer to summarize, answer immediately with the complete useful summary available. "
+        "Do not ask which condition, ask for confirmation, or repeat the offer. Organize the "
+        "answer into documented conditions/findings, important results, recurring concerns, "
+        "and next questions for the clinician. If the records contain findings but no explicit "
+        "diagnosis, label them as findings rather than conditions.\n\n"
         "You may surface longitudinal observations only when supported by repeated, dated "
         "evidence. State the count and relevant dates, seasons, locations, or other context. "
         "For unusual candidate correlations such as lunar phase, require at least 3 similar "
@@ -500,7 +508,7 @@ async def _generate_reply(
         '{"reply":"string","sources_used":["health_memory|health_values|document_findings|prep_cards|chat_history|family_history|general_knowledge"],'
         '"memory_updates":{"durable_facts":["string"],"recurring_concerns":["string"],'
         '"recent_episodes":["string"]}}.\n\n'
-        f"User health context:\n{json.dumps(context, default=str)}"
+        f"User health context:\n{json.dumps(prompt_context, default=str)}"
     )
     messages = [{"role": "system", "content": prompt}]
     messages.extend({"role": row["role"], "content": row["content"]} for row in history)
@@ -510,34 +518,41 @@ async def _generate_reply(
         data = await _client.chat(role="companion", messages=messages, temperature=0.3)
     except AgentFailure as exc:
         logger.warning("Companion model failure: %s", exc.code)
-        return (_fallback_reply(message, context), ["general_knowledge"], _empty_memory_updates())
+        return (_fallback_reply(message, context, history), ["general_knowledge"], _empty_memory_updates())
     except Exception:
         logger.exception("Unexpected companion generation failure")
-        return (_fallback_reply(message, context), ["general_knowledge"], _empty_memory_updates())
+        return (_fallback_reply(message, context, history), ["general_knowledge"], _empty_memory_updates())
 
     if not isinstance(data, dict):
         logger.warning("Companion returned a non-object JSON response")
-        return (_fallback_reply(message, context), ["general_knowledge"], _empty_memory_updates())
+        return (_fallback_reply(message, context, history), ["general_knowledge"], _empty_memory_updates())
 
     reply = str(data.get("reply") or "").strip()
     sources = _normalise_sources(data.get("sources_used"))
     if not reply:
         return (
-            _fallback_reply(message, context),
+            _fallback_reply(message, context, history),
             ["general_knowledge"],
             _empty_memory_updates(),
         )
-    if _is_diagnostic_question(message) and _is_unhelpful_refusal(reply, context):
+    needs_constrained_retry = (
+        (_is_diagnostic_question(message) and _is_unhelpful_refusal(reply, context))
+        or (summary_request and _is_unhelpful_summary_reply(reply))
+    )
+    if needs_constrained_retry:
         retry_messages = [
             *messages,
             {"role": "assistant", "content": json.dumps(data, default=str)},
             {
                 "role": "user",
                 "content": (
-                    "That answer was an unhelpful generic refusal. Do not claim a diagnosis. "
-                    "Instead, use my supplied records to provide an educational differential: "
-                    "plausible possibilities, evidence for and against each, missing information, "
-                    "red flags, and the next clinical step. Return the required JSON only."
+                    "That answer did not complete the user's request. Do not ask another "
+                    "clarifying or confirmation question. Use every supplied record category "
+                    "now. If the request is for all conditions or a full summary, list the "
+                    "documented conditions/findings and important results directly, distinguishing "
+                    "recorded facts from possible interpretations. Otherwise provide an educational "
+                    "differential with evidence for and against, missing information, red flags, "
+                    "and the next clinical step. Return the required JSON only."
                 ),
             },
         ]
@@ -553,7 +568,11 @@ async def _generate_reply(
 
         if isinstance(retry_data, dict):
             retry_reply = str(retry_data.get("reply") or "").strip()
-            if retry_reply and not _is_unhelpful_refusal(retry_reply, context):
+            if (
+                retry_reply
+                and not _is_unhelpful_refusal(retry_reply, context)
+                and not (summary_request and _is_unhelpful_summary_reply(retry_reply))
+            ):
                 return (
                     retry_reply,
                     _normalise_sources(retry_data.get("sources_used")),
@@ -562,7 +581,7 @@ async def _generate_reply(
 
         logger.warning("Companion returned repeated generic diagnosis refusal")
         return (
-            _fallback_reply(message, context),
+            _fallback_reply(message, context, history),
             _context_sources(context),
             _empty_memory_updates(),
         )
@@ -635,7 +654,11 @@ def _meaningful_tokens(value: str) -> set[str]:
     }
 
 
-def _fallback_reply(message: str, context: dict) -> str:
+def _fallback_reply(message: str, context: dict, history: list | None = None) -> str:
+    if _is_record_summary_request(message, history):
+        summary = _record_summary_reply(context)
+        if summary:
+            return summary
     clinical_question = _is_diagnostic_question(message)
     has_records = any(
         context.get(key)
@@ -667,6 +690,223 @@ def _fallback_reply(message: str, context: dict) -> str:
         "I could not complete the full response just now. "
         "I can still help with general wellness routines or prepare questions for your doctor."
     )
+
+
+def _is_record_summary_request(message: str, history: list | None = None) -> bool:
+    lowered = " ".join(message.casefold().split())
+    direct_markers = (
+        "all conditions",
+        "all condition",
+        "all illnesses",
+        "all illness",
+        "summary of all",
+        "summarize all",
+        "summarise all",
+        "full summary",
+        "complete summary",
+        "everything in",
+        "all her conditions",
+        "all his conditions",
+        "all my conditions",
+    )
+    if any(marker in lowered for marker in direct_markers):
+        return True
+
+    if lowered not in {"yes", "yes please", "please do", "go ahead", "proceed", "okay", "ok"}:
+        return False
+
+    recent = history or []
+    for row in reversed(recent[-4:]):
+        content = str(row.get("content") or "").casefold()
+        if any(
+            marker in content
+            for marker in (
+                "summary of all",
+                "summarize all",
+                "summary of the health conditions",
+                "would you like me to proceed",
+                "would you like a summary",
+            )
+        ):
+            return True
+    return False
+
+
+def _is_unhelpful_summary_reply(reply: str) -> bool:
+    lowered = " ".join(reply.casefold().split())
+    return any(
+        marker in lowered
+        for marker in (
+            "please specify which",
+            "which illness",
+            "which condition",
+            "could you please specify",
+            "would you like me to proceed",
+            "please confirm",
+            "would you like a summary",
+            "can provide you with a summary",
+        )
+    )
+
+
+def _record_summary_reply(context: dict) -> str:
+    sections: list[str] = []
+    memory = context.get("health_memory") or {}
+
+    documented = _unique_text([
+        *(memory.get("durable_facts") or []),
+        *(memory.get("notable_results") or []),
+        *[
+            finding.get("finding")
+            for finding in (context.get("document_findings") or [])
+            if finding.get("finding")
+        ],
+    ], limit=8)
+    if documented:
+        sections.append(
+            "Documented conditions and findings:\n"
+            + "\n".join(f"- {item}" for item in documented)
+        )
+
+    values = []
+    for value in context.get("extracted_health_values") or []:
+        name = str(value.get("value_name") or "").strip()
+        raw = str(value.get("value_raw") or "").strip()
+        unit = str(value.get("unit") or "").strip()
+        date = str(value.get("recorded_date") or "").strip()
+        if name and raw:
+            detail = " ".join(part for part in (name, raw, unit) if part)
+            if date:
+                detail += f" ({date})"
+            if value.get("is_abnormal") is True:
+                detail += " - marked abnormal in the record"
+            values.append(detail)
+    values = _unique_text(values, limit=8)
+    if values:
+        sections.append("Important recorded results:\n" + "\n".join(f"- {item}" for item in values))
+
+    concerns = _unique_text([
+        *(memory.get("recurring_concerns") or []),
+        *[
+            card.get("symptom_description")
+            for card in (context.get("past_prep_cards") or [])
+            if card.get("symptom_description")
+        ],
+    ], limit=6)
+    if concerns:
+        sections.append("Recurring concerns in the history:\n" + "\n".join(f"- {item}" for item in concerns))
+
+    if not sections:
+        summary = str(memory.get("summary") or "").strip()
+        if summary:
+            sections.append(f"Record summary:\n{summary}")
+        else:
+            return ""
+
+    sections.append(
+        "Useful next discussion: ask the treating clinician which recorded items are confirmed "
+        "diagnoses, which are report findings only, what has changed over time, and which need "
+        "follow-up testing or specialist review."
+    )
+    return "\n\n".join(sections)
+
+
+def _unique_text(values: list, *, limit: int) -> list[str]:
+    rows: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value or "").strip()
+        marker = text.casefold()
+        if text and marker not in seen:
+            rows.append(text)
+            seen.add(marker)
+        if len(rows) >= limit:
+            break
+    return rows
+
+
+def _select_context_for_message(
+    message: str,
+    context: dict,
+    *,
+    summary_request: bool = False,
+) -> dict:
+    """Bound prompt context while preserving complete summaries and safety evidence."""
+    if summary_request:
+        limits = {"values": 20, "findings": 20, "cards": 8, "statements": 8, "family": 12}
+    else:
+        limits = {"values": 10, "findings": 8, "cards": 4, "statements": 5, "family": 6}
+
+    tokens = _meaningful_tokens(message)
+    selected = dict(context)
+    selected["extracted_health_values"] = _rank_context_rows(
+        context.get("extracted_health_values") or [],
+        tokens,
+        limits["values"],
+        text_fields=("value_name", "value_raw", "unit", "reference_range"),
+    )
+    selected["document_findings"] = _rank_context_rows(
+        context.get("document_findings") or [],
+        tokens,
+        limits["findings"],
+        text_fields=("section", "finding"),
+    )
+    selected["past_prep_cards"] = _rank_context_rows(
+        context.get("past_prep_cards") or [],
+        tokens,
+        limits["cards"],
+        text_fields=("symptom_description", "date"),
+    )
+    selected["recent_user_health_statements"] = _rank_context_rows(
+        context.get("recent_user_health_statements") or [],
+        tokens,
+        limits["statements"],
+        text_fields=("content", "date"),
+    )
+
+    referenced_ids = set(context.get("referenced_profile_ids") or [])
+    family_rows = context.get("family_profiles") or []
+    referenced = [
+        row for row in family_rows if str(row.get("id") or "") in referenced_ids
+    ]
+    other_family = [
+        row for row in family_rows if str(row.get("id") or "") not in referenced_ids
+    ]
+    selected["family_profiles"] = [
+        *referenced,
+        *_rank_context_rows(
+            other_family,
+            tokens,
+            max(0, limits["family"] - len(referenced)),
+            text_fields=("display_name", "relation", "health_summary"),
+        ),
+    ][:limits["family"]]
+    return selected
+
+
+def _rank_context_rows(
+    rows: list[dict],
+    tokens: set[str],
+    limit: int,
+    *,
+    text_fields: tuple[str, ...],
+) -> list[dict]:
+    if limit <= 0:
+        return []
+
+    def score(row: dict) -> tuple[int, int]:
+        text = " ".join(str(row.get(field) or "") for field in text_fields)
+        overlap = len(tokens & _meaningful_tokens(text))
+        abnormal = 1 if row.get("is_abnormal") is True else 0
+        return overlap, abnormal
+
+    indexed = list(enumerate(rows))
+    ranked = sorted(
+        indexed,
+        key=lambda item: (*score(item[1]), -item[0]),
+        reverse=True,
+    )
+    return [row for _, row in ranked[:limit]]
 
 
 def _fallback_evidence(context: dict) -> str:

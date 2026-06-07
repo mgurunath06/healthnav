@@ -4,7 +4,9 @@ import asyncio
 import hashlib
 import json
 import time
+import contextvars
 from datetime import datetime, timezone
+from typing import Any, Callable
 
 from .assembler_agent import AssemblerAgent, AssemblerInput, AssemblerOutput
 from .deep_dive_agent import (
@@ -24,6 +26,8 @@ from .triage_agent import TriageAgent, TriageInput, TriageOutput
 _FOLLOWUP_BUDGETS = {1: 0, 2: 1, 3: 2, 4: 4, 5: 6}
 _FOLLOWUP_MINIMUMS = {1: 0, 2: 1, 3: 2, 4: 3, 5: 4}
 
+
+progress_callback_var: contextvars.ContextVar[Callable[[dict[str, Any]], None] | None] = contextvars.ContextVar("progress_callback", default=None)
 
 class Supervisor:
     def __init__(self) -> None:
@@ -697,7 +701,7 @@ class Supervisor:
         status: str = "ok",
         metadata: dict | None = None,
     ) -> None:
-        print(json.dumps({
+        payload = {
             "timestamp": _iso_now(),
             "request_id": request_id,
             "event_type": event_type,
@@ -705,7 +709,17 @@ class Supervisor:
             "duration_ms": duration_ms,
             "status": status,
             "metadata": metadata or {},
-        }), flush=True)
+        }
+        print(json.dumps(payload), flush=True)
+
+        cb = progress_callback_var.get()
+        if cb:
+            cb({
+                "event": event_type,
+                "agent": agent,
+                "duration_ms": duration_ms,
+                "status": status,
+            })
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

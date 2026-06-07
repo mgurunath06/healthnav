@@ -11,6 +11,8 @@ export const useInvestigationStore = create((set) => ({
   topicOverview: null,
   error: null,
   investigationStartedAt: null,
+  agentTrace: [],
+  currentAgent: null,
 
   setScreen: (screen) => set({ screen }),
   setRequestId: (requestId) => set({ requestId }),
@@ -22,6 +24,28 @@ export const useInvestigationStore = create((set) => ({
   setApiResponse: (apiResponse) => set({ apiResponse }),
   setTopicOverview: (topicOverview) => set({ topicOverview }),
   setError: (error) => set({ error }),
+  resetAgentTrace: () => set({ agentTrace: [], currentAgent: null }),
+  applyAgentEvent: (event) => set((state) => {
+    if (!event.agent) return state
+    const status = event.event === 'agent_started'
+      ? 'pending'
+      : event.event === 'agent_completed' ? 'ok' : 'failed'
+    const existing = state.agentTrace.findIndex((item) => item.agent === event.agent)
+    const nextItem = {
+      agent: event.agent,
+      status,
+      duration_ms: event.duration_ms ?? null,
+    }
+    const agentTrace = existing === -1
+      ? [...state.agentTrace, nextItem]
+      : state.agentTrace.map((item, index) => index === existing ? { ...item, ...nextItem } : item)
+    return {
+      agentTrace,
+      currentAgent: status === 'pending'
+        ? event.agent
+        : state.currentAgent === event.agent ? null : state.currentAgent,
+    }
+  }),
 
   reset: () => set({
     screen: 'input',
@@ -34,5 +58,7 @@ export const useInvestigationStore = create((set) => ({
     topicOverview: null,
     error: null,
     investigationStartedAt: null,
+    agentTrace: [],
+    currentAgent: null,
   }),
 }))

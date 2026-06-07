@@ -5,6 +5,11 @@
 > **Source of truth:** This document. Code must conform. If reality forces a change, update this doc *first*, then code.
 
 ### Changelog
+- **v2.7** — Enterprise scale hardening: companion context is bounded and
+  query-relevant; all-record summary requests must complete without clarification
+  loops; deterministic record-summary fallback added. Enterprise review
+  dispositions and phased retrieval, streaming, upload-efficiency, monetization,
+  and authentication roadmap documented in §26.
 - **v2.6** — Complete family profile graph: first-login self onboarding,
   relationship hierarchy, profile viewers, automatic natural-language profile
   creation, profile-aware chat and investigation context, family-risk signals,
@@ -816,7 +821,9 @@ Scale: 12 / 14 / 16 / 20 / 24 / 32 / 48px. Tight line-heights on headings; gener
 - Hero: date (monospace) + Triage Quadrant Badge (coloured per §10.7).
 - Sections: Summary · Key Findings · Questions for Doctor · Recommended Next Step. Separated by `border-warm-border` `<hr />` tags.
 - "Questions for Doctor" items use left border accent (`border-l-2 border-quadrant-q2`) on `bg-warm-elevated` rows.
-- CTAs: "Save as PDF" (outlined Sienna, **disabled in v1 — stub only**) · "Start Over" (text link).
+- CTAs: "Save as PDF" opens the browser print dialog with print-specific styling;
+  "Share Card" creates a shareable image with download fallback; "Start Over"
+  resets the investigation.
 
 **`<EmergencyScreen />`**
 - Full-screen takeover. Total stillness — no animations.
@@ -853,7 +860,7 @@ Scale: 12 / 14 / 16 / 20 / 24 / 32 / 48px. Tight line-heights on headings; gener
 - Tailwind CSS with custom Warm Slate token config
 - Accent: Burnt Sienna `#C4622D` (not teal)
 - Mobile-first, desktop-optimised
-- "Save as PDF" CTA rendered but disabled (PDF generation is v2)
+- Print-to-PDF and shareable image export are available.
 - Route structure: `/` = input, `/result` = card (stub `/premium` route planned for v2)
 
 ---
@@ -2241,7 +2248,29 @@ CREATE INDEX idx_chat_messages_conversation ON chat_messages(conversation_id, cr
 - **Conversation list:** left sidebar on desktop (`w-64`); accessible via back-nav link on mobile. Shows conversation title + date.
 - **Profile selector:** shown at the top of the chat view — "Chatting about: [profile display_name]". Uses `<ProfileSelector />` component (§23.4).
 - **Loading state:** Agent Trace pattern (§6 of `UIDeisgn.md`) — a single pulsing line, no spinner.
-- **No streaming in v1** — full response displayed at once when ready.
+- **Progress streaming:** `POST /investigate` streams sanitized agent lifecycle
+  events when the client sends `Accept: text/event-stream`. The final API payload
+  is delivered atomically as a `final_result` event. Clients without that header
+  continue to receive the standard JSON response.
+
+### 24.9 Context budget and retrieval evolution
+
+The companion prompt must not receive every available record row by default.
+
+- Compact profile memory is always available.
+- Detailed values, findings, briefs, user statements, and family summaries are
+  ranked against meaningful terms in the current message.
+- Routine messages receive at most 10 values, 8 findings, 4 briefs, 5 recent user
+  statements, and 6 family summaries.
+- Full-record summary requests may receive at most 20 values, 20 findings,
+  8 briefs, 8 statements, and 12 family summaries.
+- Explicitly referenced family profiles are retained before other family summaries.
+- Abnormal results receive a ranking preference.
+- These limits constrain prompt construction; source records remain unchanged.
+
+The next retrieval stage replaces bulk prompt construction with read-only,
+profile-scoped tools and hybrid structured/lexical/vector search. Retrieval must
+never influence Guardrail, Triage, Red Flag, Supervisor, or quadrant scoring.
 
 **Component map:**
 - `<ChatScreen />` — route wrapper, loads conversation list
@@ -2485,6 +2514,26 @@ Content hash computed once. On upload, before any LLM call. Never recomputed. SH
 Duplicate check skipped for force_reupload = true. No further duplicate check; a new log row is created as normal.
 No bulk delete in v1. Users delete one upload at a time. Bulk operations deferred.
 Sprint assignment: GET /documents, GET /documents/{id}, soft delete, and duplicate detection all land in Sprint 7 alongside the upload pipeline. The content_hash column and is_deleted column must be added in migration 003 alongside the profiles migration.
+
+## 26. Enterprise Scale Roadmap
+
+The detailed review response and decision log live in
+`spec/enterprise_scale_review_response.md`.
+
+### 26.1 Locked priorities
+
+1. Companion token/cost telemetry and account usage budgets.
+2. Tool-based, profile-scoped retrieval with structured filters and hybrid search.
+3. SSE orchestration progress while retaining atomic validated clinical outputs.
+4. Client-side upload hash preflight with mandatory server-side verification.
+5. Configurable, versioned, clinician-reviewed reminder policy.
+6. Payment and broader authentication after business and support prerequisites.
+
+### 26.2 Clinical constraints
+
+Scale work must not introduce predictive diagnosis, causal health claims, or
+history-dependent urgency scoring. Pattern features remain evidence-counted,
+non-causal, explainable, and additive to doctor preparation only.
 ## 19.8 Family Profile Graph
 
 HealthNav supports one account owner managing multiple independent people. A

@@ -1,6 +1,14 @@
 from types import SimpleNamespace
 from unittest import TestCase
 
+from test_support import (
+    install_asyncpg_stub_if_native_import_is_blocked,
+    install_orjson_stub_if_native_import_is_blocked,
+)
+
+install_orjson_stub_if_native_import_is_blocked()
+install_asyncpg_stub_if_native_import_is_blocked()
+
 from pydantic import ValidationError
 
 from agents.supervisor import (

@@ -16,7 +16,7 @@ export async function autofillProfileFromAnswer({
   selectedProfileId,
   getToken,
 }) {
-  const update = explicitProfileUpdate(question, answer)
+  const update = profileUpdateFromAnswer(question, answer)
   if (!update) return
 
   try {
@@ -43,7 +43,7 @@ export async function autofillProfileFromAnswer({
   }
 }
 
-function explicitProfileUpdate(question, answer) {
+export function profileUpdateFromAnswer(question, answer) {
   const subject = `${question.id ?? ''} ${question.question ?? ''}`.toLowerCase()
   const value = String(answer).trim()
 
@@ -76,6 +76,6 @@ function normaliseDate(value) {
 }
 
 function isValidDate(value) {
-  const date = new Date(`${value}T00:00:00`)
+  const date = new Date(`${value}T00:00:00Z`)
   return !Number.isNaN(date.getTime()) && date.toISOString().startsWith(value)
 }

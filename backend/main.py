@@ -1,16 +1,19 @@
 import os
 import math
+import asyncio
+import json
 from contextlib import asynccontextmanager
 from datetime import date
+from typing import AsyncGenerator
 
 from fastapi import FastAPI, Header, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from auth import verify_clerk_token
 from pydantic import BaseModel, Field
 
-from agents.supervisor import Supervisor
+from agents.supervisor import Supervisor, progress_callback_var
 from db.client import close_pool, get_pool
 from db.health_memory import (
     ensure_health_memory_schema,
@@ -111,8 +114,10 @@ def health():
 @app.post("/investigate")
 async def investigate(
     req: InvestigateRequest,
+    request: Request,
     authorization: str | None = Header(default=None),
-) -> dict:
+):
+    is_stream = "text/event-stream" in request.headers.get("accept", "")
     investigation_depth = 2
     personal_context: dict | None = None
     user_id: str | None = None
@@ -216,31 +221,82 @@ async def investigate(
                 }
                 for key, value in req.follow_up_answers.items()
             ]
-        result = await _supervisor.run(
-            request_id=req.request_id,
-            symptom_description=req.symptom_description,
-            investigation_depth=investigation_depth,
-            follow_up_history=follow_up_history,
-            screening_context=req.screening_context,
-            personal_context=personal_context,
+
+        async def run_investigation() -> dict:
+            result = await _supervisor.run(
+                request_id=req.request_id,
+                symptom_description=req.symptom_description,
+                investigation_depth=investigation_depth,
+                follow_up_history=follow_up_history,
+                screening_context=req.screening_context,
+                personal_context=personal_context,
+            )
+            if result.get("status") == "complete" and pool is not None and user_id is not None:
+                card = result.get("doctor_prep_card") or {}
+                episode = _episode_memory(req.symptom_description, card, req.client_context, personal_context)
+                async with pool.acquire() as conn:
+                    await merge_health_memory(
+                        conn,
+                        user_id,
+                        profile_id,
+                        recurring_concerns=[req.symptom_description],
+                        recent_episodes=[episode],
+                        source="investigation",
+                    )
+            return result
+
+        if not is_stream:
+            return await run_investigation()
+
+        queue: asyncio.Queue[dict | None] = asyncio.Queue()
+
+        def progress_callback(data: dict) -> None:
+            if data.get("event") in {"agent_started", "agent_completed", "agent_failed"}:
+                queue.put_nowait(data)
+
+        async def run_orchestration() -> None:
+            token = progress_callback_var.set(progress_callback)
+            try:
+                result = await run_investigation()
+                await queue.put({"event": "final_result", "payload": result})
+            except Exception:
+                await queue.put({
+                    "event": "error",
+                    "payload": {
+                        "status": "error",
+                        "request_id": req.request_id,
+                        "error_code": "AGENT_FAILURE",
+                        "message": "An unexpected error occurred. Please try again.",
+                    },
+                })
+            finally:
+                progress_callback_var.reset(token)
+                await queue.put(None)
+
+        async def event_generator() -> AsyncGenerator[str, None]:
+            task = asyncio.create_task(run_orchestration())
+            try:
+                while True:
+                    try:
+                        item = await asyncio.wait_for(queue.get(), timeout=15)
+                    except asyncio.TimeoutError:
+                        yield ": keep-alive\n\n"
+                        continue
+                    if item is None:
+                        break
+                    yield f"data: {json.dumps(item, separators=(',', ':'))}\n\n"
+            finally:
+                if not task.done():
+                    task.cancel()
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",
+            },
         )
-        if (
-            result.get("status") == "complete"
-            and pool is not None
-            and user_id is not None
-        ):
-            card = result.get("doctor_prep_card") or {}
-            episode = _episode_memory(req.symptom_description, card, req.client_context, personal_context)
-            async with pool.acquire() as conn:
-                await merge_health_memory(
-                    conn,
-                    user_id,
-                    profile_id,
-                    recurring_concerns=[req.symptom_description],
-                    recent_episodes=[episode],
-                    source="investigation",
-                )
-        return result
     except Exception:
         return {
             "status": "error",

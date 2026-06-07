@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { useAuth } from '@clerk/clerk-react'
 import { useInvestigationStore } from '../store/useInvestigationStore'
 import { autofillProfileFromAnswer } from '../lib/profileAutofill'
+import { consumeEventStream } from '../lib/sse'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
 
@@ -20,6 +21,7 @@ export function useInvestigation() {
     store.setSymptomDescription(symptomDescription)
     store.setScreen('loading')
     store.setError(null)
+    store.resetAgentTrace()
 
     try {
       const token = isSignedIn ? await getToken() : null
@@ -41,24 +43,32 @@ export function useInvestigation() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          Accept: 'text/event-stream, application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify(body),
       })
 
-      const data = await res.json()
-      store.setApiResponse(data)
-      // Cache topic overview — keep first non-null value across rounds
-      if (data.topic_overview) {
-        store.setTopicOverview(data.topic_overview)
-      }
+      if (!res.ok) throw new Error(`Server error: ${res.status}`)
 
-      switch (data.status) {
-        case 'complete':       store.setScreen('prep_card');  break
-        case 'needs_followup': store.setScreen('wizard');     break
-        case 'emergency':      store.setScreen('emergency');  break
-        case 'redirect':       store.setScreen('redirect');   break
-        default:               store.setScreen('error'); store.setError(data.message ?? 'Unknown error')
+      const contentType = res.headers.get('content-type') ?? ''
+      if (contentType.includes('text/event-stream')) {
+        let receivedFinalResult = false
+        await consumeEventStream(res, (event) => {
+          if (['agent_started', 'agent_completed', 'agent_failed'].includes(event.event)) {
+            store.applyAgentEvent(event)
+          } else if (event.event === 'final_result') {
+            receivedFinalResult = true
+            applyResult(event.payload, store)
+          } else if (event.event === 'error') {
+            throw new Error(event.payload?.message ?? 'Investigation stream failed.')
+          }
+        })
+        if (!receivedFinalResult) {
+          throw new Error('The investigation stream ended before returning a result.')
+        }
+      } else {
+        applyResult(await res.json(), store)
       }
     } catch (err) {
       store.setScreen('error')
@@ -90,6 +100,32 @@ export function useInvestigation() {
   }
 
   return { investigate, submitAnswer, reset: store.reset }
+}
+
+function applyResult(data, store) {
+  store.setApiResponse(data)
+  if (data.agent_trace?.length && useInvestigationStore.getState().agentTrace.length === 0) {
+    for (const item of data.agent_trace) {
+      if (item.agent && item.status) {
+        store.applyAgentEvent({
+          event: item.status === 'failed' ? 'agent_failed' : 'agent_completed',
+          agent: item.agent,
+          duration_ms: item.duration_ms,
+        })
+      }
+    }
+  }
+  if (data.topic_overview) store.setTopicOverview(data.topic_overview)
+
+  switch (data.status) {
+    case 'complete':       store.setScreen('prep_card'); break
+    case 'needs_followup': store.setScreen('wizard'); break
+    case 'emergency':      store.setScreen('emergency'); break
+    case 'redirect':       store.setScreen('redirect'); break
+    default:
+      store.setScreen('error')
+      store.setError(data.message ?? 'Unknown error')
+  }
 }
 
 function seasonForMonth(month) {

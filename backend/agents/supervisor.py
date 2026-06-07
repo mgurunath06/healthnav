@@ -138,17 +138,23 @@ class Supervisor:
         minimum_followups = _FOLLOWUP_MINIMUMS.get(investigation_depth, 2)
         below_minimum = len(follow_up_history) < minimum_followups
         if (
-            deep_dive is not None
-            and (deep_dive.needs_followup or below_minimum)
+            ((deep_dive is not None and deep_dive.needs_followup) or below_minimum)
             and len(follow_up_history) < min(_MAX_FOLLOWUP, max_followups)
         ):
-            # Stop early if key clinical dimensions are already covered
-            if not _findings_sufficient(
-                deep_dive.structured_findings,
+            # Force follow-up if agent wants it or we are below minimum.
+            # Only Level 1-3 can stop early if findings are sufficient.
+            force_minimum = investigation_depth >= 4
+            insufficient = deep_dive is None or not _findings_sufficient(
+                deep_dive.structured_findings if deep_dive else None,
                 follow_up_history,
-                investigation_depth,
-            ):
-                deduped = _dedup_questions(deep_dive.followup_questions, follow_up_history)
+                investigation_depth
+            )
+            
+            if (deep_dive is not None and deep_dive.needs_followup) or (below_minimum and (force_minimum or insufficient)):
+                deduped = _dedup_questions(
+                    deep_dive.followup_questions if deep_dive is not None else [],
+                    follow_up_history,
+                )
                 filtered = _filter_saturated_topics(deduped, follow_up_history)
                 if below_minimum and not filtered:
                     fallback = _fallback_followup_question(
@@ -161,7 +167,7 @@ class Supervisor:
                         request_id,
                         filtered,
                         trace,
-                        deep_dive.topic_overview,
+                        deep_dive.topic_overview if deep_dive is not None else None,
                         screening_payload,
                     )
 

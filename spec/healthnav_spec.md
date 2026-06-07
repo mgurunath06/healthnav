@@ -1,10 +1,11 @@
-# HealthNav — Technical Spec (v2.3)
+# HealthNav — Technical Spec (v2.8)
 
 > **Status:** Contracts locked. Implementation details added per sprint.
 > **Scope:** v1 MVP complete. v2 Premium tier — auth, user data, saved cards, payment architecture.
 > **Source of truth:** This document. Code must conform. If reality forces a change, update this doc *first*, then code.
 
 ### Changelog
+- **v2.8** — Closed group pilot exception: relaxed clinical boundary rules for authenticated users. Authorized predictive diagnostics, medical recommendations, and history-dependent urgency scoring within the closed pilot group.
 - **v2.7** — Enterprise scale hardening: companion context is bounded and
   query-relevant; all-record summary requests must complete without clarification
   loops; deterministic record-summary fallback added. Enterprise review
@@ -48,7 +49,9 @@
 **Free tier only.** Anonymous symptom investigation → dynamic agent orchestration → Doctor Prep Card with urgency/importance quadrant rating.
 
 ### 1.3 Product positioning (legal/ethical)
-HealthNav is a **preparation tool**, not a diagnostic tool. It exists to help users organise their thoughts before a doctor visit. It does not diagnose, prescribe, or replace medical advice. Every output recommends consulting a licensed medical professional. The system **never** tells a user they don't need to see a doctor.
+HealthNav is a **preparation tool**, not a diagnostic tool for public users. It exists to help users organise their thoughts before a doctor visit. It does not diagnose, prescribe, or replace medical advice for anonymous users. Every public output recommends consulting a licensed medical professional. The system **never** tells an anonymous user they don't need to see a doctor.
+
+**Closed Group Pilot Exception:** For authenticated users participating in the closed group pilot, the system is authorized to provide personalized medical recommendations, predictive diagnostics, and clinical guidance based on their longitudinal health profile.
 
 ### 1.4 Data flow
 ```
@@ -890,7 +893,7 @@ Auth, smart learning layer, saved cards, document pipeline, reminders, and payme
 ### 12.2 v3 — Correlation + Intelligence (~months, requires legal + medical review)
 **Vision:** Symptom history correlation across visits. System spots patterns, tracks quadrant movement over time, surfaces insights.
 
-**Requirements before building:**
+**Requirements before public release (bypassed for closed group pilot):**
 - Legal counsel (T&Cs, privacy policy, liability framework)
 - Possible medical device registration (CDSCO India / FDA US / MDR EU — correlation = Clinical Decision Support territory)
 - Encrypted DB with row-level security
@@ -1706,23 +1709,25 @@ Response (200):
 }
 ```
 
-### 19.6 Clinical boundary rule (mandatory)
+### 19.6 Clinical boundary rule (Public / Anonymous Users Only)
 
-> This rule is immutable. It may not be changed without updating this spec first.
+> This rule applies to public, unauthenticated traffic. For authenticated users in the closed group pilot, historical data and predictive modeling MAY be used to generate specific medical recommendations and alter urgency scoring.
 
-**The following inputs to quadrant scoring are fixed and never modified by user history:**
+**For anonymous users, the following inputs to quadrant scoring are fixed and never modified by user history:**
 - `urgency_score` — derived only from current Triage + Red Flag outputs
 - `importance_score` — derived only from current Deep-Dive findings
 - `quadrant_id` — derived only from above two scores
 - `recommended_next_step` — derived only from quadrant
 
-**Past history MAY influence:**
+**For public users, past history MAY influence:**
 - Follow-up questions asked (personalisation)
 - "Personal context" note in Doctor Prep Card (additive, clearly labelled)
 - Dashboard nudges and reminders
 - Lifestyle correlation narrative
 
-**Rationale:** The clinical output (what action the user should take) must reflect only their current symptoms. History context enriches the conversation; it must not change the medical recommendation. This protects users from a pattern that skews them toward or away from seeking care.
+**For authenticated users in the closed pilot:**
+- Predictive diagnostics are enabled.
+- Past history, inferred patterns, and longitudinal correlations can directly influence clinical recommendations, urgency scoring, and generated treatment advice.
 
 ### 19.7 Profile health memory
 

@@ -63,7 +63,6 @@ Respond ONLY with a valid JSON object — no markdown fences, no text outside th
 - Every question must be a DIRECT consequence of what was just answered. Ask what the answer made you curious about. Do not ask generic, template questions.
   BAD: "How long have you had this symptom?" (generic)
   GOOD: "You said the pain is constant — does it wake you up at night, or is it only while you're awake?" (follows from the previous answer)
-- When personal health memory is supplied, each question must first account for what is already known about this person.
   CRITICAL: Never use historical data as a substitute for investigating the CURRENT episode. Even if a user has a long history, you MUST still establish the duration, severity, frequency, and triggers of the symptoms they are reporting RIGHT NOW.
   For high investigation depths (Level 4 and 5), you MUST complete the requested number of follow-up exchanges even if the situation seems clear from history.
   Prefer one of these personalised question strategies:
@@ -215,9 +214,10 @@ def _personal_context_section(context: dict | None) -> str:
         f"Family history summaries: {context.get('family_history') or []}\n"
         f"Family-risk considerations: {context.get('family_risk_considerations') or []}\n"
         f"Current setting: {context.get('current_context') or {}}\n"
-        "Use this to avoid repeated questions and ask about meaningful changes or recurring patterns. "
-        "Keep relatives' findings separate from the subject. Use them only to ask a relevant "
-        "family-history or screening question, naming the relationship that supports it. "
+        "Use this to anchor your questions in known context and look for meaningful changes or recurring patterns. "
+        "For this closed pilot group, you are authorized to provide predictive diagnostics, synthesize historical patterns, "
+        "and suggest causal links or medical recommendations based on the user's longitudinal memory. "
+        "You may directly state possible diagnoses and specific recommended next steps."
         "The next question should be explicitly personalised when the memory contains relevant context. "
         "Do not assume an old concern explains the current symptom. Mention common temporal or "
         "location patterns only when at least two dated episodes support them. Require at least "

@@ -20,7 +20,7 @@ would weaken HealthNav's clinical boundary if implemented literally.
 |---|---|---|
 | Payment deferred | Accept | Monetization remains deferred pending incorporation. Add usage budgets before paid launch. |
 | No response streaming | Modify | Add progress-event streaming first. Keep final clinical payload atomic and schema-validated. |
-| Predictive diagnostics | Reject | Predictive diagnosis or proactive deterioration claims cross the locked clinical boundary and require medical-device review. Evidence-supported, non-causal pattern prompts remain allowed. |
+| Predictive diagnostics | Accept for closed pilot | Predictive diagnosis and proactive deterioration claims are authorized for authenticated users within the closed group pilot. |
 | PDF export missing | Corrected | Print-to-PDF and shareable card capture are already implemented in `PrepCard.jsx`; the old spec text was stale. |
 | Google-only authentication | Accept as roadmap | Add passkeys/email or Apple only after account recovery, identity-linking, and support flows are designed. |
 | Companion context stuffing | Accept | Immediate bounded, query-relevant context selection implemented. Tool-based retrieval is the next architecture stage. |

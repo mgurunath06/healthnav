@@ -15,6 +15,7 @@ import PrivateRoute from './components/PrivateRoute'
 import ProfileScreen from './components/ProfileScreen'
 import ChatScreen from './components/ChatScreen'
 import ProfileDetailScreen from './components/ProfileDetailScreen'
+import Footer from './components/Footer'
 import './App.css'
 
 function InvestigationFlow({ memberMode = false }) {
@@ -54,15 +55,20 @@ function HomeRoute() {
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/"                  element={<HomeRoute />} />
-      <Route path="/investigate"       element={<PrivateRoute><InvestigationFlow memberMode /></PrivateRoute>} />
-      <Route path="/login"             element={<LoginScreen />} />
-      <Route path="/dashboard"         element={<PrivateRoute><PremiumDashboard /></PrivateRoute>} />
-      <Route path="/dashboard/upload"  element={<PrivateRoute><DocumentUploadScreen /></PrivateRoute>} />
-      <Route path="/profile"           element={<PrivateRoute><ProfileScreen /></PrivateRoute>} />
-      <Route path="/profile/:profileId" element={<PrivateRoute><ProfileDetailScreen /></PrivateRoute>} />
-      <Route path="/chat"              element={<PrivateRoute><ChatScreen /></PrivateRoute>} />
-    </Routes>
+    <div className="flex min-h-dvh flex-col">
+      <div className="flex flex-1 flex-col">
+        <Routes>
+          <Route path="/"                   element={<HomeRoute />} />
+          <Route path="/investigate"        element={<PrivateRoute><InvestigationFlow memberMode /></PrivateRoute>} />
+          <Route path="/login"              element={<LoginScreen />} />
+          <Route path="/dashboard"          element={<PrivateRoute><PremiumDashboard /></PrivateRoute>} />
+          <Route path="/dashboard/upload"   element={<PrivateRoute><DocumentUploadScreen /></PrivateRoute>} />
+          <Route path="/profile"            element={<PrivateRoute><ProfileScreen /></PrivateRoute>} />
+          <Route path="/profile/:profileId" element={<PrivateRoute><ProfileDetailScreen /></PrivateRoute>} />
+          <Route path="/chat"               element={<PrivateRoute><ChatScreen /></PrivateRoute>} />
+        </Routes>
+      </div>
+      <Footer />
+    </div>
   )
 }

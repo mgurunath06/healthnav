@@ -108,7 +108,7 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "2.0", "tier_support": ["free", "premium"]}
+    return {"status": "ok", "version": "2.0", "provider": "Jaitra Labs", "tier_support": ["free", "premium"]}
 
 
 @app.post("/investigate")

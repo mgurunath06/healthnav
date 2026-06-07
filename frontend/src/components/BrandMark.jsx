@@ -8,8 +8,13 @@ export default function BrandMark({ compact = false }) {
         className="h-10 w-10 rounded-full object-cover"
       />
       {!compact && (
-        <span className="font-serif text-xl font-medium tracking-[-0.03em] text-warm-off-white">
-          HealthNav
+        <span className="flex flex-col leading-none">
+          <span className="font-serif text-xl font-medium tracking-[-0.03em] text-warm-off-white">
+            HealthNav
+          </span>
+          <span className="font-sans text-[10px] tracking-wide text-warm-muted">
+            By Jaitra Labs
+          </span>
         </span>
       )}
     </span>

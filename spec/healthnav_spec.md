@@ -1,10 +1,11 @@
-# HealthNav — Technical Spec (v2.8)
+# HealthNav — Technical Spec (v2.9)
 
 > **Status:** Contracts locked. Implementation details added per sprint.
 > **Scope:** v1 MVP complete. v2 Premium tier — auth, user data, saved cards, payment architecture.
 > **Source of truth:** This document. Code must conform. If reality forces a change, update this doc *first*, then code.
 
 ### Changelog
+- **v2.9** — Branding update: Added "By Jaitra Labs" to logo requirements and mandatory copyright footer to all screens.
 - **v2.8** — Closed group pilot exception: relaxed clinical boundary rules for authenticated users. Authorized predictive diagnostics, medical recommendations, and history-dependent urgency scoring within the closed pilot group.
 - **v2.7** — Enterprise scale hardening: companion context is bounded and
   query-relevant; all-record summary requests must complete without clarification
@@ -853,11 +854,11 @@ Scale: 12 / 14 / 16 / 20 / 24 / 32 / 48px. Tight line-heights on headings; gener
 ### 10.11 Disclaimer rules
 | Screen | Disclaimer |
 |---|---|
-| Input screen footer | "Your data stays private. Not a diagnosis tool. Always consult a licensed medical professional." |
+| Input screen footer | "Your data stays private. Not a diagnosis tool. Always consult a licensed medical professional. © 2026 Jaitra Labs. All rights reserved." |
 | Result screen (prominent box) | Full disclaimer from §6 |
 | Emergency screen | Built into advisory copy |
 | Redirect screen | "Please consult a healthcare professional for personalised advice." |
-| Every screen | Never hidden, never collapsed |
+| Every screen | Never hidden, never collapsed. Footer must include the copyright notice: "© 2026 Jaitra Labs". |
 
 ### 10.12 Visual scope (v1)
 - Tailwind CSS with custom Warm Slate token config

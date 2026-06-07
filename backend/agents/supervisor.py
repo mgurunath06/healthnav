@@ -25,6 +25,10 @@ from .triage_agent import TriageAgent, TriageInput, TriageOutput
 
 _FOLLOWUP_BUDGETS = {1: 0, 2: 1, 3: 2, 4: 4, 5: 6}
 _FOLLOWUP_MINIMUMS = {1: 0, 2: 1, 3: 2, 4: 3, 5: 4}
+# Anonymous users always get 5 questions minimum so they experience the
+# product enough to want to sign in — budget is capped at 7 to stay cheap.
+_ANON_FOLLOWUP_MINIMUM = 5
+_ANON_FOLLOWUP_BUDGET = 7
 
 
 progress_callback_var: contextvars.ContextVar[Callable[[dict[str, Any]], None] | None] = contextvars.ContextVar("progress_callback", default=None)
@@ -50,7 +54,8 @@ class Supervisor:
     ) -> dict:
         follow_up_history = follow_up_history or []
         trace: list[dict] = []
-        max_followups = _FOLLOWUP_BUDGETS.get(investigation_depth, 4)
+        is_anonymous = personal_context is None
+        max_followups = _ANON_FOLLOWUP_BUDGET if is_anonymous else _FOLLOWUP_BUDGETS.get(investigation_depth, 4)
 
         self._log(
             request_id,
@@ -135,7 +140,7 @@ class Supervisor:
             personal_context,
             trace,
         )
-        minimum_followups = _FOLLOWUP_MINIMUMS.get(investigation_depth, 2)
+        minimum_followups = _ANON_FOLLOWUP_MINIMUM if is_anonymous else _FOLLOWUP_MINIMUMS.get(investigation_depth, 2)
         below_minimum = len(follow_up_history) < minimum_followups
         if (
             ((deep_dive is not None and deep_dive.needs_followup) or below_minimum)

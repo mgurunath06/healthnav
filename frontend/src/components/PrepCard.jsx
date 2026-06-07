@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import html2canvas from 'html2canvas'
 import { useAuth, useUser } from '@clerk/clerk-react'
 import { useInvestigationStore } from '../store/useInvestigationStore'
@@ -253,6 +254,27 @@ export default function PrepCard() {
             </div>
 
           </div>
+
+          {/* ── Free-tier upsell ── */}
+          {!isSignedIn && (
+            <div className="mt-6 rounded-2xl border border-accent/40 bg-warm-elevated p-6 no-print">
+              <p className="font-mono text-xs text-accent tracking-widest uppercase mb-2">Free Preview</p>
+              <h3 className="font-serif text-xl font-light text-warm-off-white mb-2">
+                This is your basic prep card
+              </h3>
+              <p className="font-sans text-sm text-warm-muted leading-relaxed mb-4">
+                You asked 5 questions and got a starter card. Sign in for comprehensive investigations
+                (up to 6 questions), personalised health memory, family profiles, and saved cards you
+                can share with your doctor.
+              </p>
+              <Link
+                to="/login"
+                className="inline-block px-6 py-3 rounded-full bg-accent text-warm-charcoal font-sans font-semibold text-sm hover:bg-marigold transition-colors duration-250"
+              >
+                Sign in — it's free
+              </Link>
+            </div>
+          )}
 
           {/* ── CTAs ── */}
           <div className="mt-6 flex items-center justify-between no-print">

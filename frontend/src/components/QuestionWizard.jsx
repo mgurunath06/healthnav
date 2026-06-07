@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
+import { useUser } from '@clerk/clerk-react'
 import { useInvestigationStore } from '../store/useInvestigationStore'
 import { useInvestigation } from '../hooks/useInvestigation'
 import Header from './Header'
@@ -10,6 +12,7 @@ export default function QuestionWizard() {
   const topicOverview = useInvestigationStore((s) => s.topicOverview)
   const { submitAnswer } = useInvestigation()
 
+  const { isSignedIn } = useUser()
   const isLoading   = screen === 'loading'
   const question    = apiResponse?.questions?.[0]
   const [answer,     setAnswer]     = useState(null)
@@ -63,6 +66,19 @@ export default function QuestionWizard() {
   return (
     <div className="app-canvas min-h-dvh bg-warm-charcoal flex flex-col">
       <Header />
+
+      {/* Free-tier upsell strip */}
+      {!isSignedIn && (
+        <div className="shrink-0 border-b border-warm-border/50 bg-warm-elevated px-4 py-2.5 text-center">
+          <p className="font-sans text-xs text-warm-muted">
+            Free preview · {followUpHistory.length}/5 questions answered &mdash; your card will be basic.{' '}
+            <Link to="/login" className="text-accent underline underline-offset-2 hover:text-marigold">
+              Sign in
+            </Link>
+            {' '}for comprehensive analysis, health memory &amp; saved cards.
+          </p>
+        </div>
+      )}
 
       {/* Three-column body */}
       <div className="flex flex-1 overflow-hidden">
